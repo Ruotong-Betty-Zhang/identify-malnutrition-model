@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 import os
 
 # Reading an encrypted Excel file
-encrypted_file_path = "./datasets/InterRAI Pt 4 2505-v2.xlsx"
+encrypted_file_path = "./datasets/InterRAI Pt 4 2505.xlsx"
 target_folder = "./datasets/"
 # Use password in .env
 load_dotenv()
