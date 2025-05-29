@@ -1,2 +1,83 @@
+# ================================
+# Python Bytecode & Cache
+# ================================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ================================
+# Virtual Environment
+# ================================
+env/
+venv/
+ENV/
+.venv/
+.Python
+
+# ================================
+# Environment Variables
+# ================================
 .env
+.env.*
+
+# ================================
+# VSCode Settings
+# ================================
+.vscode/
+
+# ================================
+# Logs and Runtime Files
+# ================================
+*.log
+*.pid
+*.seed
+*.bak
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ================================
+# Jupyter Notebook
+# ================================
+.ipynb_checkpoints/
+
+# ================================
+# Testing
+# ================================
+.coverage
+.tox/
+.nox/
+pytest_cache/
+htmlcov/
+.cache/
+
+# ================================
+# Packaging & Build
+# ================================
+build/
+dist/
+*.egg-info/
+.eggs/
+MANIFEST
+
+# ================================
+# MyPy / Pyright / Pylint / Coverage
+# ================================
+.mypy_cache/
+.pytype/
+.pyre/
+.pyright/
+
+# ================================
+# IDE Files (PyCharm, etc.)
+# ================================
+.idea/
+*.iml
+
+# ================================
+# Mac/Linux system files
+# ================================
+*.DS_Store
+
 datasets

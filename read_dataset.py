@@ -11,6 +11,7 @@ import os
 
 # Reading an encrypted Excel file
 encrypted_file_path = "./datasets/InterRAI Pt 4 2505-v2.xlsx"
+target_folder = "./datasets/"
 # Use password in .env
 load_dotenv()
 password = os.getenv("PASSWORD")
@@ -38,11 +39,11 @@ df = drop_columns(df)
 # Generate cap df
 cap_df = drop_cap_nutrition_rows(df)
 cap_df = average_fill_empty(cap_df)
-cap_df.to_pickle('cap_data.pkl')
-# df = pd.read_pickle('data.pkl')
+cap_df.to_pickle(target_folder + 'cap_data.pkl')
+# df = pd.read_pickle(target_folder + 'cap_data.pkl')
 
 # Generate mal df
 mal_df = average_fill_empty(df)
 mal_df = calculate_malnutrition(df)
-mal_df.to_pickle('mal_data.pkl')
-# mal_df = pd.read_pickle('mal_data.pkl')
+mal_df.to_pickle(target_folder + 'mal_data.pkl')
+# mal_df = pd.read_pickle(target_folder + 'mal_data.pkl')
