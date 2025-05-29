@@ -1,0 +1,106 @@
+import pandas as pd
+from datetime import datetime
+import locale
+
+def calculate_age(basic_info, extra_info):
+	# Use the IDNo, Date1, Q4Age_BL columns to create a new DataFrame
+    tempDf = extra_info[["IDNo", "Date1", "Q4Age_BL"]]
+    locale.setlocale(locale.LC_TIME, 'C')
+
+    # Go through each row in the DataFrame
+    for index, row in tempDf.iterrows():
+        # Convert the date string to a datetime object
+        date_str = row["Date1"]
+        date_obj = datetime.strptime(date_str, "%d%b%Y")
+
+        # Extract the year and month
+        year = date_obj.year
+        month = date_obj.month
+        age = row["Q4Age_BL"]
+        if not age or age <= 0:
+            basic_info.at[index, "Age"] = None
+            continue
+
+        seen = False
+        for index2, row2 in basic_info.iterrows():
+            # Check if the IDNo and month are the same
+            if seen and row["IDNo"] != row2["IDno"]:
+                break
+            if row["IDNo"] == row2["IDno"]:
+                date_str2 = row2["Assessment_Date"]
+                date_obj2 = datetime.strptime(date_str2, "%d%b%Y")
+                year2 = date_obj2.year
+                month2 = date_obj2.month
+
+                yearDiff = year2 - year
+                monthDiff = month2 - month
+                # Use the years and months to calculate age in df1
+                age2 = age + yearDiff + monthDiff / 12
+                # Add the age to the DataFrame
+                basic_info.at[index2, "Age"] = age2
+                seen = True
+
+    # If age is below 0, set it to None
+    basic_info.loc[basic_info["Age"] < 0, "Age"] = None
+
+    # Print the age of the first 10 patients
+    print(basic_info[["IDno", "Age"]].head(10))
+    return basic_info
+
+def drop_columns(df):
+    # Drop all cols after iJ1g
+    start_index = df.columns.get_loc('iJ1g')
+    cols_to_drop = df.columns[start_index:-1]
+    df = df.drop(columns=cols_to_drop)
+
+    # drop iK4d: Dry mouth 
+    df = df.drop(columns=["iK4d"])
+
+    # drop iNN2: Not in dictionary, and no data
+    df = df.drop(columns=["iNN2"])
+
+    # drop iJ1(miss 63% of the data, 2190 data missing): Falls
+    df = df.drop(columns=["iJ1"])
+    
+    return df
+
+def average_fill_empty(df):
+    # Fill NaN values with the mean of each column
+    copied_df = df.copy()
+    copied_df.fillna(copied_df.mean(numeric_only=True), inplace=True)
+    return copied_df
+
+def calculate_malnutrition(df):
+    df["Malnutrition"] = df.apply(get_malnutrition_status, axis=1)
+    df = df.drop(columns=["iK2a", "iK2g", "iG3", "iE2a", "iE2b", "iE2c", "iI1c", "iI1d", "CAP_Nutrition"])
+    return df
+
+def get_malnutrition_status(row):
+    if row["iK2a"] is None or row["iK2g"] is None or row["iG3"] is None or row["iE2a"] is None or row["iE2b"] is None or row["iE2c"] is None or row["iI1c"] is None:
+        return -1
+    score = 0
+    mood = False
+    dementia = False
+    if row["iK2a"] == 1:
+        score += 1
+    if row["iK2g"] == 1:
+        score += 1
+    if row["iG3"] in [2, 3]:
+        score += 1
+    if row["iE2a"] in [3, 8]:
+        score += 1
+        mood = True
+    if row["iE2b"] in [3, 8] and not mood:
+        score += 1
+        mood = True
+    if row["iE2c"] in [3, 8] and not mood:
+        score += 1
+    if row["iI1c"] in [1, 2, 3]:
+        score += 1
+        dementia = True
+    if row["iI1d"] in [1, 2, 3] and not dementia:
+        score += 1
+    return score
+
+def drop_cap_nutrition_rows(df):
+    return df.dropna(subset=["CAP_Nutrition"])
