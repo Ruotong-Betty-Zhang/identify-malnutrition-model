@@ -3,6 +3,7 @@ from datetime import datetime
 import locale
 
 def calculate_age(basic_info, extra_info):
+    """Add Age column to basic_info DataFrame based on extra_info DataFrame."""
 	# Use the IDNo, Date1, Q4Age_BL columns to create a new DataFrame
     tempDf = extra_info[["IDNo", "Date1", "Q4Age_BL"]]
     locale.setlocale(locale.LC_TIME, 'C')
@@ -48,6 +49,7 @@ def calculate_age(basic_info, extra_info):
     return basic_info
 
 def drop_columns(df):
+    """Return a DataFrame with unnecessary columns dropped."""
     # Drop all cols after iJ1g
     start_index = df.columns.get_loc('iJ1g')
     cols_to_drop = df.columns[start_index:-1]
@@ -65,14 +67,15 @@ def drop_columns(df):
     return df
 
 def average_fill_empty(df):
+    """Fill NaN values in the DataFrame with the mean of each column."""
     # Fill NaN values with the mean of each column
     copied_df = df.copy()
     copied_df.fillna(copied_df.mean(numeric_only=True), inplace=True)
     return copied_df
 
 def calculate_malnutrition(df):
+    """Calculate malnutrition status based on specific columns and return a DataFrame with the new column."""
     df["Malnutrition"] = df.apply(get_malnutrition_status, axis=1)
-    df = df.drop(columns=["iK2a", "iK2g", "iG3", "iE2a", "iE2b", "iE2c", "iI1c", "iI1d", "CAP_Nutrition"])
     return df
 
 def get_malnutrition_status(row):
@@ -103,4 +106,5 @@ def get_malnutrition_status(row):
     return score
 
 def drop_cap_nutrition_rows(df):
+    """Drop rows where CAP_Nutrition is NaN and return the DataFrame."""
     return df.dropna(subset=["CAP_Nutrition"])
