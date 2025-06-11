@@ -21,16 +21,16 @@ np.random.seed(42)
 seed = 42
 
 # Read mal_df
-mal_df = pd.read_pickle(dataset_folder + 'mal_data.pkl')
-print(f"Malnutrition DataFrame shape: {mal_df.shape}")
+cap_df = pd.read_pickle(dataset_folder + 'cap_data.pkl')
+print(f"CAP DataFrame shape: {cap_df.shape}")
 
 # Check the Malnutrition column, set [0, 1, 2] to 0, and [3, 4, 5] to 1
-mal_df['Malnutrition'] = mal_df['Malnutrition'].apply(lambda x: 0 if x in [0, 1, 2] else 1)
-mal_df = mal_df.drop(columns=['IDno', 'Assessment_Date'])
+cap_df['Malnutrition'] = cap_df['Malnutrition'].apply(lambda x: 0 if x in [0, 1, 2] else 1)
+cap_df = cap_df.drop(columns=['IDno', 'Assessment_Date'])
 
 # Seperate the features and the target
-X = mal_df.drop(columns=["Malnutrition"])
-y = mal_df["Malnutrition"]
+X = cap_df.drop(columns=["CAP_Nutrition"])
+y = cap_df["CAP_Nutrition"]
 
 # Split the data into training and testing sets
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=seed)
@@ -73,19 +73,19 @@ plt.yticks(range(top_n), top_features[::-1])
 plt.xlabel("Feature Importance")
 plt.title("Top 12 Most Important Features")
 plt.tight_layout()
-plt.savefig(target_folder + "maldt_top_12_features.png", dpi=300)
+plt.savefig(target_folder + "cap_dt_top_12_features.png", dpi=300)
 plt.close()
-print("Saved top 12 feature importance plot as maldt_top_12_features.png")
+print("Saved top 12 feature importance plot as cap_dt_top_12_features.png")
 
 # Save the model
-model_path = os.path.join(target_folder, 'mal_decision_tree_model.pkl')
+model_path = os.path.join(target_folder, 'cap_decision_tree_model.pkl')
 
 joblib.dump(clf, model_path)
 print(f"Model saved to {model_path}")
 
 plt.figure(figsize=(40, 20))
-plot_tree(clf, filled=True, feature_names=X.columns, class_names=["0", "1"], fontsize=10)
+plot_tree(clf, filled=True, feature_names=X.columns, class_names=["0", "1", "2"], fontsize=10)
 plt.title("Decision Tree", fontsize=16)
-plt.savefig(target_folder + "mal_decision_tree.png", dpi=300, bbox_inches='tight')
+plt.savefig(target_folder + "cap_decision_tree.png", dpi=300, bbox_inches='tight')
 plt.close()
-print("Saved as mal_decision_tree.png")
+print("Saved as cap_decision_tree.png")

@@ -40,12 +40,13 @@ print(f"Test set size: {X_test.shape[0]}")
 
 # Create a Decision Tree Classifier
 params = {
+    'n_estimators': [100, 200, 300],  # 森林中树的数量
+    'ccp_alpha': np.linspace(0.0, 0.05, 5),
     'max_depth': [3, 5, 10, None],
-    'min_samples_split': [2, 5, 10],
-    'min_samples_leaf': [1, 2, 5],
 }
 
-grid = GridSearchCV(DecisionTreeClassifier(random_state=seed), params, cv=5)
+# 网格搜索交叉验证
+grid = GridSearchCV(RandomForestClassifier(random_state=seed), params, cv=5, n_jobs=-1)
 grid.fit(X_train, y_train)
 print("Best parameters found: ", grid.best_params_)
 
@@ -58,34 +59,6 @@ print("Accuracy:", accuracy_score(y_test, y_test_pred))
 print("Confusion Matrix:\n", confusion_matrix(y_test, y_test_pred))
 print("Classification Report:\n", classification_report(y_test, y_test_pred))
 
-# Plot the top 12 feature importances
-importances = clf.feature_importances_
-indices = np.argsort(importances)[::-1]
-top_n = 12
-top_indices = indices[:top_n]
-top_features = X.columns[top_indices]
-top_importances = importances[top_indices]
-
-# Create a bar plot for the top 12 feature importances
-plt.figure(figsize=(12, 6))
-plt.barh(range(top_n), top_importances[::-1], align='center')
-plt.yticks(range(top_n), top_features[::-1])
-plt.xlabel("Feature Importance")
-plt.title("Top 12 Most Important Features")
-plt.tight_layout()
-plt.savefig(target_folder + "maldt_top_12_features.png", dpi=300)
-plt.close()
-print("Saved top 12 feature importance plot as maldt_top_12_features.png")
-
-# Save the model
-model_path = os.path.join(target_folder, 'mal_decision_tree_model.pkl')
-
+model_path = os.path.join(target_folder, 'mal_random_forest_model.pkl')
 joblib.dump(clf, model_path)
 print(f"Model saved to {model_path}")
-
-plt.figure(figsize=(40, 20))
-plot_tree(clf, filled=True, feature_names=X.columns, class_names=["0", "1"], fontsize=10)
-plt.title("Decision Tree", fontsize=16)
-plt.savefig(target_folder + "mal_decision_tree.png", dpi=300, bbox_inches='tight')
-plt.close()
-print("Saved as mal_decision_tree.png")
