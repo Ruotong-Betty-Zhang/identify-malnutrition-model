@@ -48,6 +48,14 @@ def calculate_age(basic_info, extra_info):
     print(basic_info[["IDno", "Age"]].head(10))
     return basic_info
 
+def generate_gender_column_and_carelevel(basic_info, extra_info):
+    basic_info['Gender'] = extra_info['Q2Gender']
+    mapping = {'Hospital': 3, 'Dementia Unit': 2, 'Rest Home': 1}
+    basic_info['CareLevel'] = extra_info['CareLevel'].map(mapping)
+    print(basic_info[['CareLevel', 'Gender']].head(10))
+    return basic_info
+
+
 def drop_columns(df):
     """Return a DataFrame with unnecessary columns dropped."""
     # Drop all cols after iJ1g
@@ -108,3 +116,23 @@ def get_malnutrition_status(row):
 def drop_cap_nutrition_rows(df):
     """Drop rows where CAP_Nutrition is NaN and return the DataFrame."""
     return df.dropna(subset=["CAP_Nutrition"])
+
+
+def check_missing_values(columns_to_check, df):
+    """Check for missing values in the specified columns of the DataFrame."""
+    missing_values = df[columns_to_check].isnull().sum()
+    # Get the total number of rows in the DataFrame
+    total_count = df[columns_to_check].shape[0]
+
+    # Calculate the loss rate (percentage of missing values)
+    loss_rate = (missing_values / total_count).round(4) * 100  # Convert to percentage with 2 decimal places
+
+    # Create a DataFrame to display the results
+    result_df = pd.DataFrame({
+        'Missing Values': missing_values,
+        'Total Values': total_count,
+        'Data Loss Rate (%)': loss_rate
+    })
+
+    # Display the results
+    print(result_df)

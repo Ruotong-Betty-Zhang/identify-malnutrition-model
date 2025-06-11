@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
 import locale
-from utils import calculate_age, drop_columns, average_fill_empty, calculate_malnutrition, drop_cap_nutrition_rows
+from utils import calculate_age, drop_columns, average_fill_empty, calculate_malnutrition, drop_cap_nutrition_rows, generate_gender_column_and_carelevel, check_missing_values
 from dotenv import load_dotenv
 import os
 
@@ -15,18 +15,17 @@ target_folder = "./datasets/"
 # Use password in .env
 load_dotenv()
 # Reading an encrypted Excel file
-encrypted_file_path = os.getenv("CSV_PATH")
+# encrypted_file_path = os.getenv("CSV_PATH")
 password = os.getenv("PASSWORD")
 
-# 解密并读取
+
 with open(encrypted_file_path, "rb") as f:
     office_file = msoffcrypto.OfficeFile(f)
     office_file.load_key(password=password)
-
+    # Decrypt the file
     decrypted = io.BytesIO()
     office_file.decrypt(decrypted)
 
-    # 读取解密后的 Excel 内容
     dfs = pd.read_excel(decrypted, sheet_name=None, engine="openpyxl")
 
 
@@ -36,6 +35,10 @@ extra_info_df = dfs["Staying Upright demo2"]
 
 # Preprocess the DataFrames
 df = calculate_age(basic_info_df, extra_info_df)
+df = generate_gender_column_and_carelevel(basic_info_df, extra_info_df)
+# Check for missing values
+columns_to_check = ['iJ1g', 'iJ1h', 'iJ1i', 'iJ12', 'iK1ab', 'iK1bb']
+check_missing_values(columns_to_check, df)
 df = drop_columns(df)
 
 # Generate cap df
