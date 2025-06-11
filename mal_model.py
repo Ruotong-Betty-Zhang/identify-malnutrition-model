@@ -9,14 +9,10 @@ import matplotlib.pyplot as plt
 from sklearn.tree import plot_tree
 from sklearn.ensemble import RandomForestClassifier
 
-def split_cap_data(df):
-    cols_to_drop = [df.columns[0], df.columns[1], 'CAP_Nutrition', 'Scale_BMI']
+def split_mal_data(df):
+    cols_to_drop = [df.columns[0], df.columns[1], 'Malnutrition']
     X = df.drop(columns=cols_to_drop)
-    if 'Malnutrition' in X.columns:
-        X = X.drop(columns=['Malnutrition'])
-    
-    y = df['CAP_Nutrition']
-    
+    y = df['Malnutrition']
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y, shuffle=True)
     print(f"X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
     print(f"X_test shape: {X_test.shape}, y_test shape: {y_test.shape}")
@@ -27,17 +23,12 @@ def train_decision_tree(X_train, y_train):
     clf.fit(X_train, y_train)
     return clf
 
-def train_random_forest(X_train, y_train):
-    clf = RandomForestClassifier(random_state=42, class_weight='balanced', n_estimators=200, max_depth=30, min_samples_split=10)
-    clf.fit(X_train, y_train)
-    return clf
-
 def get_and_print_accuracy(clf, X_test, y_test):
     y_pred = clf.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
     print(f"Decision Tree Accuracy: {accuracy:.4f}")
     print("Classification Report:")
-    print(classification_report(y_test, y_pred))
+    print(classification_report(y_test, y_pred, zero_division=0))
     print("Confusion Matrix:")
     print(confusion_matrix(y_test, y_pred))
     return accuracy
@@ -59,38 +50,36 @@ def plot_feature_importance(clf, X_train, top_n=20):
     plt.ylabel('Feature')
     plt.tight_layout()
     
-    plt.savefig("./image/cap_without_Mal_score_feature_importance.png", dpi=300, bbox_inches='tight')
+    plt.savefig("./image/mal_feature_importance_score_0_5.png", dpi=300, bbox_inches='tight')
     plt.show()
-
+    
+def train_random_forest(X_train, y_train):
+    clf = RandomForestClassifier(random_state=42, n_estimators=300, max_depth=30)
+    clf.fit(X_train, y_train)
+    return clf
+    
 def save_model_to_pdf(clf, X, filename="decision_tree_model.pdf"):
     plt.figure(figsize=(40, 20))  
     plot_tree(clf, 
-            feature_names=X.columns, 
-            class_names=True, 
-            filled=True, 
-            max_depth=9)  # max_depth limit
-
-    plt.tight_layout()
-    plt.savefig(filename)  # save to PDF
+              feature_names=X.columns, 
+              class_names=True, 
+              filled=True, 
+              fontsize=10)
+    plt.savefig(filename, format='pdf', bbox_inches='tight')
     plt.close()
 
 if __name__ == "__main__":
-    df = pd.read_pickle("./datasets/cap_data.pkl")
-    X_train, X_test, y_train, y_test = split_cap_data(df)
-    # decision tree
+    df = pd.read_pickle("./datasets/mal_data.pkl")
+    X_train, X_test, y_train, y_test = split_mal_data(df)
+    # Train the decision tree classifier
     # clf = train_decision_tree(X_train, y_train)
-    # y_pred = clf.predict(X_test)
     # accuracy = get_and_print_accuracy(clf, X_test, y_test)
     # plot_feature_importance(clf, X_train, top_n=20)
-    # save_model_to_pdf(clf, X_train, "./tree/cap_without_Mal_score_decision_tree_model.pdf")
+    # save_model_to_pdf(clf, X_train, "./tree/mal_decision_tree_model_score_0_5.pdf")
     
-    # random forest
+    # Train the random forest classifier
     rf_clf = train_random_forest(X_train, y_train)
-    y_pred_rf = rf_clf.predict(X_test)
     rf_accuracy = get_and_print_accuracy(rf_clf, X_test, y_test)
     plot_feature_importance(rf_clf, X_train, top_n=20)
-    save_model_to_pdf(rf_clf, X_train, "./tree/cap_without_Mal_score_random_forest_model.pdf")
-    
-    
-    
+    save_model_to_pdf(rf_clf, X_train, "./tree/mal_random_forest_model_score_0_5.pdf")
     
