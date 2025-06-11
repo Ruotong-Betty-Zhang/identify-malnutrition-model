@@ -59,19 +59,18 @@ def generate_gender_column_and_carelevel(basic_info, extra_info):
 def drop_columns(df):
     """Return a DataFrame with unnecessary columns dropped."""
     # Drop all cols after iJ1g
+    columns_to_keep = ['iJ1g', 'iJ1h', 'iJ1i', 'iK1ab']
     start_index = df.columns.get_loc('iJ1g')
-    cols_to_drop = df.columns[start_index:-1]
-    df = df.drop(columns=cols_to_drop)
+    cols_from_start = df.columns[start_index:]
+    cols_to_drop = [col for col in cols_from_start if col not in columns_to_keep]
 
     # drop iK4d: Dry mouth 
-    df = df.drop(columns=["iK4d"])
-
     # drop iNN2: Not in dictionary, and no data
-    df = df.drop(columns=["iNN2"])
-
     # drop iJ1(miss 63% of the data, 2190 data missing): Falls
-    df = df.drop(columns=["iJ1"])
+    additional_cols_to_drop = ["iK4d", "iNN2", "iJ1"]
+    cols_to_drop.extend(additional_cols_to_drop)
     
+    df = df.drop(columns=cols_to_drop)
     return df
 
 def average_fill_empty(df):
@@ -136,3 +135,16 @@ def check_missing_values(columns_to_check, df):
 
     # Display the results
     print(result_df)
+    
+def fill_missing_by_idno_and_mode(df, id_column='IDno'):
+    """Fill missing values in specified columns by the mode of each IDno group."""
+    columns = df.columns[df.isnull().any()].tolist()
+    result_df = df.copy()
+    for col in columns:
+        global_mode = df[col].mode().iloc[0] if not df[col].mode().empty else None
+        
+        grouped = df.groupby(id_column)
+        result_df[col] = grouped[col].transform(
+        lambda x: x.fillna(x.mode().iloc[0] if not x.mode().empty else global_mode)
+    )
+    return result_df

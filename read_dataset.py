@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
 import locale
-from utils import calculate_age, drop_columns, average_fill_empty, calculate_malnutrition, drop_cap_nutrition_rows, generate_gender_column_and_carelevel, check_missing_values
+from utils import calculate_age, drop_columns, average_fill_empty, calculate_malnutrition, drop_cap_nutrition_rows, generate_gender_column_and_carelevel, check_missing_values, fill_missing_by_idno_and_mode
 from dotenv import load_dotenv
 import os
 
@@ -36,20 +36,20 @@ extra_info_df = dfs["Staying Upright demo2"]
 # Preprocess the DataFrames
 df = calculate_age(basic_info_df, extra_info_df)
 df = generate_gender_column_and_carelevel(basic_info_df, extra_info_df)
-# Check for missing values
-columns_to_check = ['iJ1g', 'iJ1h', 'iJ1i', 'iJ12', 'iK1ab', 'iK1bb']
-check_missing_values(columns_to_check, df)
+# # Check for missing values
+# columns_to_check = ['iJ1g', 'iJ1h', 'iJ1i', 'iJ12', 'iK1ab', 'iK1bb']
+# check_missing_values(columns_to_check, df)
 df = drop_columns(df)
 
 # Generate cap df
 cap_df = drop_cap_nutrition_rows(df)
-cap_df = average_fill_empty(cap_df)
+cap_df = fill_missing_by_idno_and_mode(cap_df)
 cap_df = calculate_malnutrition(cap_df)
 cap_df.to_pickle(target_folder + 'cap_data.pkl')
 # df = pd.read_pickle(target_folder + 'cap_data.pkl')
 
 # Generate mal df
-mal_df = average_fill_empty(df)
+mal_df = fill_missing_by_idno_and_mode(df)
 mal_df = calculate_malnutrition(df)
 mal_df = mal_df.drop(columns=["iK2a", "iK2g", "iG3", "iE2a", "iE2b", "iE2c", "iI1c", "iI1d", "CAP_Nutrition"])
 mal_df.to_pickle(target_folder + 'mal_data.pkl')
