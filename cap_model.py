@@ -5,9 +5,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import classification_report, confusion_matrix
-import matplotlib.pyplot as plt
 from sklearn.tree import plot_tree
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
 
 def split_cap_data(df):
     cols_to_drop = [df.columns[0], df.columns[1], 'CAP_Nutrition', 'Scale_BMI']
@@ -28,9 +29,23 @@ def train_decision_tree(X_train, y_train):
     return clf
 
 def train_random_forest(X_train, y_train):
-    clf = RandomForestClassifier(random_state=42, class_weight='balanced', n_estimators=200, max_depth=30, min_samples_split=10)
-    clf.fit(X_train, y_train)
-    return clf
+    param_grid = {
+        'n_estimators': [100, 200, 300],
+        'max_depth': [10, 20, 30, None],
+        'min_samples_split': [2, 5, 10],
+        'min_samples_leaf': [1, 2, 4],
+        'max_features': ['auto', 'sqrt', 'log2'],
+        'class_weight': ['balanced', None]
+    }
+    clf = RandomForestClassifier(random_state=42)
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    
+    grid_search = GridSearchCV(clf, param_grid, cv=cv, scoring='f1_weighted', n_jobs=-1)
+    grid_search.fit(X_train, y_train)
+    
+    print("Best parameters found: ", grid_search.best_params_)
+    print("Best cross-validation score: ", grid_search.best_score_)
+    return grid_search.best_estimator_
 
 def get_and_print_accuracy(clf, X_test, y_test):
     y_pred = clf.predict(X_test)
