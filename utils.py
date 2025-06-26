@@ -1,6 +1,7 @@
 import pandas as pd
 from datetime import datetime
 import locale
+import numpy as np
 
 def calculate_age(basic_info, extra_info):
     """Add Age column to basic_info DataFrame based on extra_info DataFrame."""
@@ -148,3 +149,49 @@ def fill_missing_by_idno_and_mode(df, id_column='IDno'):
         lambda x: x.fillna(x.mode().iloc[0] if not x.mode().empty else global_mode)
     )
     return result_df
+
+# For every patient with the same IDno, calculate the change in each features compare to the last assessment divided by the day passed
+def calculate_feature_changes(df, exclude_columns=['IDno', 'Assessment_Date', 'Malnutrition', 'CAP_Nutrition']):
+    """
+    For every patient with the same IDno, calculate the change in each features compare to the last assessment divided by the day passed\n
+    :param df: DataFrame containing the patient data\n
+    :param exclude_columns: List of columns to exclude from change calculation\n
+    """
+    changed_df = df.copy()
+    changed_df['Assessment_Date'] = pd.to_datetime(changed_df['Assessment_Date'])
+
+    # Create new columns for the change in each feature
+    for column in changed_df.columns:
+        if column not in exclude_columns and '_change' not in column:
+            changed_df[f"{column}_change"] = np.nan  # Initialize with NaN
+
+    # Go through each patient
+    for patient_id in changed_df['IDno'].unique():
+        # Find the assessment dates for the patient
+        patient_data = changed_df[changed_df['IDno'] == patient_id]
+        patient_data = patient_data.sort_values(by='Assessment_Date', ascending=False)
+
+        # If there is only one assessment, remove and skip this patient
+        if len(patient_data) < 2:
+            changed_df = changed_df[changed_df['IDno'] != patient_id]
+            continue
+
+        # For each assessment, calculate the change in each feature compared to the last assessment
+        for i in range(1, len(patient_data)):
+            current_row = patient_data.iloc[i]
+            previous_row = patient_data.iloc[i - 1]
+
+            # Calculate the change in each feature
+            for column in changed_df.columns:
+                if column not in ['IDno', 'Assessment_Date', 'Malnutrition'] and '_change' not in column:
+                    column_name = f"{column}_change"
+
+                    date_diff = (current_row['Assessment_Date'] - previous_row['Assessment_Date']).days
+                    if date_diff != 0:
+                        change = (current_row[column] - previous_row[column]) / date_diff
+                        column_name = f"{column}_change"
+                        changed_df.loc[(changed_df['IDno'] == patient_id) & (changed_df['Assessment_Date'] == current_row['Assessment_Date']), column_name] = change
+
+        # Remove the first assessment for each patient, as it has no previous assessment to compare to
+        changed_df = changed_df[changed_df['Assessment_Date'] != patient_data.iloc[0]['Assessment_Date']] 
+    return changed_df

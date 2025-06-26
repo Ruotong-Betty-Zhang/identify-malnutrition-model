@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
 import locale
-from utils import calculate_age, drop_columns, average_fill_empty, calculate_malnutrition, drop_cap_nutrition_rows, generate_gender_column_and_carelevel, check_missing_values, fill_missing_by_idno_and_mode
+from utils import calculate_age, drop_columns, average_fill_empty, calculate_malnutrition, drop_cap_nutrition_rows, generate_gender_column_and_carelevel, check_missing_values, fill_missing_by_idno_and_mode, calculate_feature_changes
 from dotenv import load_dotenv
 import os
 
@@ -54,3 +54,9 @@ mal_df = calculate_malnutrition(df)
 mal_df = mal_df.drop(columns=["iK2a", "iK2g", "iG3", "iE2a", "iE2b", "iE2c", "iI1c", "iI1d", "CAP_Nutrition"])
 mal_df.to_pickle(target_folder + 'mal_data.pkl')
 # mal_df = pd.read_pickle(target_folder + 'mal_data.pkl')
+
+# Generate longitudinal df
+cap_long_df = calculate_feature_changes(cap_df)
+cap_long_df.to_pickle(target_folder + 'cap_long_data.pkl')
+mal_long_df = calculate_feature_changes(mal_df)
+mal_long_df.to_pickle(target_folder + 'mal_long_data.pkl')
