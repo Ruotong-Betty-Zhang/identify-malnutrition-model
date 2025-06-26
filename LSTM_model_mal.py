@@ -33,21 +33,21 @@ def prepare_sequence_data(df, id_col='IDno', time_col='Assessment_Date', target_
     scaler = StandardScaler()
     df[feature_cols] = scaler.fit_transform(df[feature_cols])
 
-    non_numeric_cols = df.select_dtypes(exclude=[np.number]).columns
-    print("Non-numeric columns:", non_numeric_cols.tolist())
+    # non_numeric_cols = df.select_dtypes(exclude=[np.number]).columns
+    # print("Non-numeric columns:", non_numeric_cols.tolist())
 
-    numeric_df = df.select_dtypes(include=[np.number])
-    print("Is all finite:", np.isfinite(numeric_df.values).all())
+    # numeric_df = df.select_dtypes(include=[np.number])
+    # print("Is all finite:", np.isfinite(numeric_df.values).all())
 
-    nan_cols = numeric_df.columns[numeric_df.isnull().any()]
-    print("Columns with NaN:", nan_cols.tolist())
+    # nan_cols = numeric_df.columns[numeric_df.isnull().any()]
+    # print("Columns with NaN:", nan_cols.tolist())
 
-    inf_cols = numeric_df.columns[np.isinf(numeric_df).any()]
-    print("Columns with Inf:", inf_cols.tolist())
+    # inf_cols = numeric_df.columns[np.isinf(numeric_df).any()]
+    # print("Columns with Inf:", inf_cols.tolist())
 
-    # 找出含 Inf 的列
-    inf_cols = df.select_dtypes(include=[np.number]).columns[np.isinf(df.select_dtypes(include=[np.number])).any()]
-    print("Columns with Inf:", inf_cols.tolist())
+    # # 找出含 Inf 的列
+    # inf_cols = df.select_dtypes(include=[np.number]).columns[np.isinf(df.select_dtypes(include=[np.number])).any()]
+    # print("Columns with Inf:", inf_cols.tolist())
 
     X_seqs, y_seqs, lengths, id_list = [], [], [], []
 
@@ -318,36 +318,83 @@ def search_best_model(X_seqs, y_seqs, lengths, id_list):
     
     return best_model, best_config
 
-
+def permutation_feature_importance(model, dataset, feature_idx, batch_size=32):
+    # dataset: MalnutritionDataset (X_seqs, y_seqs)
+    # feature_idx: 要打乱的特征索引
+    
+    model.eval()
+    loader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False)
+    
+    # 计算原始准确率
+    all_preds, all_labels = [], []
+    with torch.no_grad():
+        for batch_x, batch_len, batch_y in loader:
+            logits = model(batch_x, batch_len)
+            preds = logits.argmax(dim=1)
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(batch_y.cpu().numpy())
+    baseline_acc = accuracy_score(all_labels, all_preds)
+    
+    # 打乱feature_idx这个特征：针对batch里的所有序列和所有时间步进行打乱
+    all_preds_perm, all_labels_perm = [], []
+    with torch.no_grad():
+        for batch_x, batch_len, batch_y in loader:
+            batch_x_perm = batch_x.clone()
+            # 打乱feature_idx这个维度的数值，沿batch和时间步维度打乱
+            feat_values = batch_x_perm[:,:,feature_idx].flatten()
+            permuted = feat_values[torch.randperm(feat_values.size(0))]
+            batch_x_perm[:,:,feature_idx] = permuted.view(batch_x_perm.size(0), batch_x_perm.size(1))
+            
+            logits = model(batch_x_perm, batch_len)
+            preds = logits.argmax(dim=1)
+            all_preds_perm.extend(preds.cpu().numpy())
+            all_labels_perm.extend(batch_y.cpu().numpy())
+    permuted_acc = accuracy_score(all_labels_perm, all_preds_perm)
+    
+    importance = baseline_acc - permuted_acc
+    return importance
 
 if __name__ == "__main__":
     set_seed(42)
     df = pd.read_pickle("./datasets/mal_data.pkl")
     X_seqs, y_seqs, lengths, id_list = prepare_sequence_data(df)
-    best_model, best_config = search_best_model(X_seqs, y_seqs, lengths, id_list)
-    # (train_X, train_y, train_len), (test_X, test_y, test_len) = split_sequence_dataset_by_id(X_seqs, y_seqs, lengths, id_list)
+    # best_model, best_config = search_best_model(X_seqs, y_seqs, lengths, id_list)
+    (train_X, train_y, train_len), (test_X, test_y, test_len) = split_sequence_dataset_by_id(X_seqs, y_seqs, lengths, id_list)
 
-    # hidden_size = 128
-    # learning_rate = 0.01
-    # batch_size = 32
+    hidden_size = 64
+    learning_rate = 0.0005
+    batch_size = 32
 
-    # train_dataset = MalnutritionDataset(train_X, train_y)
-    # test_dataset = MalnutritionDataset(test_X, test_y)
+    train_dataset = MalnutritionDataset(train_X, train_y)
+    test_dataset = MalnutritionDataset(test_X, test_y)
 
-    # train_loader = DataLoader(train_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=True)
-    # test_loader = DataLoader(test_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False)
+    y_np = np.array([y.item() for y in y_seqs])
     
+    model = LSTMModel(input_size=X_seqs[0].shape[1], hidden_size=hidden_size, num_classes=len(np.unique(y_np)))
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     
-    # model = LSTMModel(input_size=X_seqs[0].shape[1], hidden_size=hidden_size, num_classes=len(np.unique(y_np)))
 
-    # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    # y_np = np.array([y.item() for y in y_seqs])
+    class_weights = compute_class_weight('balanced', classes=np.unique(y_np), y=y_np)
+    weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
+    loss_fn = nn.CrossEntropyLoss(weight=weights_tensor)
 
-    # class_weights = compute_class_weight('balanced', classes=np.unique(y_np), y=y_np)
-    # weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
-    # loss_fn = nn.CrossEntropyLoss(weight=weights_tensor)
+    model = train_model_with_early_stopping(model, train_loader, test_loader, optimizer, loss_fn, num_epochs=100, patience=15)
 
-    # model = train_model_with_early_stopping(model, train_loader, test_loader, optimizer, loss_fn, num_epochs=100, patience=15)
+    evaluate_model(model, test_loader)
 
-    # evaluate_model(model, test_loader)
+    feature_num = X_seqs[0].shape[1]
+    importances = []
+    for i in range(feature_num):
+        imp = permutation_feature_importance(model, test_dataset, i)
+        importances.append(imp)
+
+    feature_cols = [col for col in df.columns if col not in ['IDno', 'Assessment_Date', 'CAP_Nutrition']]
+
+    sorted_idx = np.argsort(importances)[::-1]
+    for i in sorted_idx[:10]:
+        print(f"Feature {feature_cols[i]} importance: {importances[i]:.4f}")
+
 
