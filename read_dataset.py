@@ -49,9 +49,9 @@ cap_df.to_pickle(target_folder + 'cap_data.pkl')
 # df = pd.read_pickle(target_folder + 'cap_data.pkl')
 
 # Generate mal df
-mal_df = fill_missing_by_idno_and_mode(df)
 mal_df = calculate_malnutrition(df)
-mal_df = mal_df.drop(columns=["iK2a", "iK2g", "iG3", "iE2a", "iE2b", "iE2c", "iI1c", "iI1d", "CAP_Nutrition"])
+mal_df = df.drop(columns=["iK2a", "iK2g", "iG3", "iE2a", "iE2b", "iE2c", "iI1c", "iI1d", "CAP_Nutrition"])
+mal_df = fill_missing_by_idno_and_mode(mal_df)
 mal_df.to_pickle(target_folder + 'mal_data.pkl')
 # mal_df = pd.read_pickle(target_folder + 'mal_data.pkl')
 
