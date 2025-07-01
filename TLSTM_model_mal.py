@@ -41,6 +41,8 @@ def prepare_sequence_data(df, id_col='IDno', time_col='Assessment_Date', target_
 
         # calculate time difference in days
         group_sorted['Time_Delta'] = group_sorted[time_col].diff().dt.days.fillna(0)
+        group_sorted['Time_Delta'] = group_sorted['Time_Delta'] / 180.0
+
 
         # ensure the first entry has a time delta of 0
         feature_data = group_sorted[base_feature_cols].copy()
@@ -188,15 +190,15 @@ def check_the_time_difference(df):
 
     all_deltas = np.array(all_deltas)
 
-    print("------ Time_Delta 统计 ------")
-    print(f"样本数量: {len(all_deltas)}")
-    print(f"最小值: {np.min(all_deltas)} 天")
-    print(f"最大值: {np.max(all_deltas)} 天")
-    print(f"平均值: {np.mean(all_deltas):.2f} 天")
-    print(f"中位数: {np.median(all_deltas):.2f} 天")
-    print(f"25分位: {np.percentile(all_deltas, 25):.2f} 天")
-    print(f"75分位: {np.percentile(all_deltas, 75):.2f} 天")
-    print("常见间隔（近似）计数：")
+    print("------ Time_Delta ------")
+    print(f"Number of sample: {len(all_deltas)}")
+    print(f"Min: {np.min(all_deltas)} 天")
+    print(f"Max: {np.max(all_deltas)} 天")
+    print(f"Ave: {np.mean(all_deltas):.2f} 天")
+    print(f"Midd: {np.median(all_deltas):.2f} 天")
+    print(f"25th: {np.percentile(all_deltas, 25):.2f} 天")
+    print(f"75th: {np.percentile(all_deltas, 75):.2f} 天")
+    print("number of unique time deltas:")
     for days in [7, 14, 30, 60, 90, 180, 365]:
         count = np.sum((np.abs(all_deltas - days) <= 3))  # 允许3天误差范围
         print(f" ≈ {days} 天: {count} 次")
@@ -436,7 +438,8 @@ if __name__ == "__main__":
     # print(torch.cuda.get_device_name(0))  
 
     df = pd.read_pickle("./datasets/mal_data.pkl")
-    check_the_time_difference(df)
+    # check_the_time_difference(df)
+    df['Malnutrition'] = df['Malnutrition'].apply(lambda x: 0 if x in [0, 1, 2] else 1)
     
     X_seqs, y_seqs, lengths, id_list = prepare_sequence_data(df)
     best_model, best_config = search_best_model(X_seqs, y_seqs, lengths, id_list)
