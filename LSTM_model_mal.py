@@ -25,42 +25,37 @@ def set_seed(seed=42):
         torch.backends.cudnn.benchmark = False
 
 def prepare_sequence_data(df, id_col='IDno', time_col='Assessment_Date', target_col='Malnutrition'):
-    df['Assessment_Date'] = pd.to_datetime(df['Assessment_Date'], format="%d%b%Y")
+    df[time_col] = pd.to_datetime(df[time_col], format="%d%b%Y")
     
-    feature_cols = [col for col in df.columns if col not in [id_col, time_col, target_col]]
+    base_feature_cols = [col for col in df.columns if col not in [id_col, time_col, target_col]]
     print("The original df shape is:", df.shape)
 
+    df_features = df[base_feature_cols].copy()
     scaler = StandardScaler()
-    df[feature_cols] = scaler.fit_transform(df[feature_cols])
-
-    # non_numeric_cols = df.select_dtypes(exclude=[np.number]).columns
-    # print("Non-numeric columns:", non_numeric_cols.tolist())
-
-    # numeric_df = df.select_dtypes(include=[np.number])
-    # print("Is all finite:", np.isfinite(numeric_df.values).all())
-
-    # nan_cols = numeric_df.columns[numeric_df.isnull().any()]
-    # print("Columns with NaN:", nan_cols.tolist())
-
-    # inf_cols = numeric_df.columns[np.isinf(numeric_df).any()]
-    # print("Columns with Inf:", inf_cols.tolist())
-
-    # # 找出含 Inf 的列
-    # inf_cols = df.select_dtypes(include=[np.number]).columns[np.isinf(df.select_dtypes(include=[np.number])).any()]
-    # print("Columns with Inf:", inf_cols.tolist())
+    df[base_feature_cols] = scaler.fit_transform(df_features)
 
     X_seqs, y_seqs, lengths, id_list = [], [], [], []
 
     for pid, group in df.groupby(id_col):
-        group_sorted = group.sort_values(by=time_col)
-        X = torch.tensor(group_sorted[feature_cols].values, dtype=torch.float32)
+        group_sorted = group.sort_values(by=time_col).copy()
+
+        # calculate time difference in days
+        group_sorted['Time_Delta'] = group_sorted[time_col].diff().dt.days.fillna(0)
+
+        # ensure the first entry has a time delta of 0
+        feature_data = group_sorted[base_feature_cols].copy()
+        feature_data['Time_Delta'] = group_sorted['Time_Delta']
+
+        X = torch.tensor(feature_data.values, dtype=torch.float32)
         y = torch.tensor(group_sorted[target_col].values[-1], dtype=torch.long)
+
         X_seqs.append(X)
         y_seqs.append(y)
         lengths.append(X.shape[0])
         id_list.append(pid)
 
     return X_seqs, y_seqs, lengths, id_list
+
 
 
 def split_sequence_dataset_by_id(X_seqs, y_seqs, lengths, id_list, test_size=0.2, random_state=42):
@@ -167,6 +162,9 @@ def train_model_with_early_stopping(model, train_loader, val_loader, optimizer, 
         all_preds, all_labels = [], []
 
         for batch_x, batch_len, batch_y in train_loader:
+            batch_x = batch_x.to(device)
+            batch_len = batch_len.to(device)
+            batch_y = batch_y.to(device)
             optimizer.zero_grad()
             logits = model(batch_x, batch_len)
             loss = loss_fn(logits, batch_y)
@@ -182,6 +180,9 @@ def train_model_with_early_stopping(model, train_loader, val_loader, optimizer, 
         val_preds, val_labels = [], []
         with torch.no_grad():
             for batch_x, batch_len, batch_y in val_loader:
+                batch_x = batch_x.to(device)
+                batch_len = batch_len.to(device)
+                batch_y = batch_y.to(device)
                 logits = model(batch_x, batch_len)
                 preds = logits.argmax(dim=1)
                 val_preds.extend(preds.cpu().numpy())
@@ -210,6 +211,9 @@ def evaluate_model(model, dataloader):
     all_labels = []
     with torch.no_grad():
         for batch_x, batch_len, batch_y in dataloader:
+            batch_x = batch_x.to(device)
+            batch_len = batch_len.to(device)
+            batch_y = batch_y.to(device)
             logits = model(batch_x, batch_len)
             preds = logits.argmax(dim=1)
             all_preds.extend(preds.cpu().numpy())
@@ -250,12 +254,12 @@ def search_best_model(X_seqs, y_seqs, lengths, id_list):
                 train_loader = DataLoader(train_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=True)
                 test_loader = DataLoader(test_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False)
 
-                model = LSTMModel(input_size=X_seqs[0].shape[1], hidden_size=hidden_size, num_classes=len(np.unique(y_np)))
+                model = LSTMModel(input_size=X_seqs[0].shape[1], hidden_size=hidden_size, num_classes=len(np.unique(y_np))).to(device)
                 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
                 y_np = np.array([y.item() for y in y_seqs])
                 class_weights = compute_class_weight('balanced', classes=np.unique(y_np), y=y_np)
-                weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
+                weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
                 loss_fn = nn.CrossEntropyLoss(weight=weights_tensor)
 
                 # Train the model
@@ -270,12 +274,18 @@ def search_best_model(X_seqs, y_seqs, lengths, id_list):
 
                 with torch.no_grad():
                     for batch_x, batch_len, batch_y in test_loader:
+                        batch_x = batch_x.to(device)
+                        batch_len = batch_len.to(device)
+                        batch_y = batch_y.to(device)
                         logits = model(batch_x, batch_len)
                         preds = logits.argmax(dim=1)
                         all_preds.extend(preds.cpu().numpy())
                         all_labels.extend(batch_y.cpu().numpy())
 
                     for batch_x, batch_len, batch_y in train_loader:
+                        batch_x = batch_x.to(device)
+                        batch_len = batch_len.to(device)
+                        batch_y = batch_y.to(device)
                         logits = model(batch_x, batch_len)
                         preds = logits.argmax(dim=1)
                         train_preds.extend(preds.cpu().numpy())
@@ -303,6 +313,9 @@ def search_best_model(X_seqs, y_seqs, lengths, id_list):
     all_preds, all_labels = [], []
     with torch.no_grad():
         for batch_x, batch_len, batch_y in test_loader:
+            batch_x = batch_x.to(device)
+            batch_len = batch_len.to(device)
+            batch_y = batch_y.to(device)
             logits = best_model(batch_x, batch_len)
             preds = logits.argmax(dim=1)
             all_preds.extend(preds.cpu().numpy())
@@ -320,27 +333,30 @@ def search_best_model(X_seqs, y_seqs, lengths, id_list):
 
 def permutation_feature_importance(model, dataset, feature_idx, batch_size=32):
     # dataset: MalnutritionDataset (X_seqs, y_seqs)
-    # feature_idx: 要打乱的特征索引
     
     model.eval()
     loader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False)
     
-    # 计算原始准确率
+    # calculate baseline accuracy
     all_preds, all_labels = [], []
     with torch.no_grad():
         for batch_x, batch_len, batch_y in loader:
+            batch_x = batch_x.to(device)
+            batch_len = batch_len.to(device)
+            batch_y = batch_y.to(device)
             logits = model(batch_x, batch_len)
             preds = logits.argmax(dim=1)
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(batch_y.cpu().numpy())
     baseline_acc = accuracy_score(all_labels, all_preds)
     
-    # 打乱feature_idx这个特征：针对batch里的所有序列和所有时间步进行打乱
     all_preds_perm, all_labels_perm = [], []
     with torch.no_grad():
         for batch_x, batch_len, batch_y in loader:
+            batch_x = batch_x.to(device)
+            batch_len = batch_len.to(device)
+            batch_y = batch_y.to(device)
             batch_x_perm = batch_x.clone()
-            # 打乱feature_idx这个维度的数值，沿batch和时间步维度打乱
             feat_values = batch_x_perm[:,:,feature_idx].flatten()
             permuted = feat_values[torch.randperm(feat_values.size(0))]
             batch_x_perm[:,:,feature_idx] = permuted.view(batch_x_perm.size(0), batch_x_perm.size(1))
@@ -356,45 +372,56 @@ def permutation_feature_importance(model, dataset, feature_idx, batch_size=32):
 
 if __name__ == "__main__":
     set_seed(42)
+    device = torch.device("cpu")
+
+    # Check if CUDA is available and print device information
+    # print(torch.__version__)
+    # print(torch.version.cuda)
+    # print(torch.cuda.is_available())
+    # print(torch.cuda.get_device_name(0))
+    # print(torch.cuda.is_available()) 
+    # print(torch.cuda.get_device_name(0))  
+
     df = pd.read_pickle("./datasets/mal_data.pkl")
     X_seqs, y_seqs, lengths, id_list = prepare_sequence_data(df)
     # best_model, best_config = search_best_model(X_seqs, y_seqs, lengths, id_list)
-    (train_X, train_y, train_len), (test_X, test_y, test_len) = split_sequence_dataset_by_id(X_seqs, y_seqs, lengths, id_list)
-
-    hidden_size = 64
-    learning_rate = 0.0005
-    batch_size = 32
-
-    train_dataset = MalnutritionDataset(train_X, train_y)
-    test_dataset = MalnutritionDataset(test_X, test_y)
-
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False)
-    y_np = np.array([y.item() for y in y_seqs])
     
-    model = LSTMModel(input_size=X_seqs[0].shape[1], hidden_size=hidden_size, num_classes=len(np.unique(y_np)))
+    # (train_X, train_y, train_len), (test_X, test_y, test_len) = split_sequence_dataset_by_id(X_seqs, y_seqs, lengths, id_list)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    # hidden_size = 64
+    # learning_rate = 0.0005
+    # batch_size = 32
+
+    # train_dataset = MalnutritionDataset(train_X, train_y)
+    # test_dataset = MalnutritionDataset(test_X, test_y)
+
+    # train_loader = DataLoader(train_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=True)
+    # test_loader = DataLoader(test_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False)
+    # y_np = np.array([y.item() for y in y_seqs])
+    
+    # model = LSTMModel(input_size=X_seqs[0].shape[1], hidden_size=hidden_size, num_classes=len(np.unique(y_np))).to(device)
+
+    # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     
 
-    class_weights = compute_class_weight('balanced', classes=np.unique(y_np), y=y_np)
-    weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
-    loss_fn = nn.CrossEntropyLoss(weight=weights_tensor)
+    # class_weights = compute_class_weight('balanced', classes=np.unique(y_np), y=y_np)
+    # weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
+    # loss_fn = nn.CrossEntropyLoss(weight=weights_tensor)
 
-    model = train_model_with_early_stopping(model, train_loader, test_loader, optimizer, loss_fn, num_epochs=100, patience=15)
+    # model = train_model_with_early_stopping(model, train_loader, test_loader, optimizer, loss_fn, num_epochs=100, patience=15)
 
-    evaluate_model(model, test_loader)
+    # evaluate_model(model, test_loader)
 
-    feature_num = X_seqs[0].shape[1]
-    importances = []
-    for i in range(feature_num):
-        imp = permutation_feature_importance(model, test_dataset, i)
-        importances.append(imp)
+    # feature_num = X_seqs[0].shape[1]
+    # importances = []
+    # for i in range(feature_num):
+    #     imp = permutation_feature_importance(model, test_dataset, i)
+    #     importances.append(imp)
 
-    feature_cols = [col for col in df.columns if col not in ['IDno', 'Assessment_Date', 'CAP_Nutrition']]
+    # feature_cols = [col for col in df.columns if col not in ['IDno', 'Assessment_Date', 'CAP_Nutrition']]
 
-    sorted_idx = np.argsort(importances)[::-1]
-    for i in sorted_idx[:10]:
-        print(f"Feature {feature_cols[i]} importance: {importances[i]:.4f}")
+    # sorted_idx = np.argsort(importances)[::-1]
+    # for i in sorted_idx[:10]:
+    #     print(f"Feature {feature_cols[i]} importance: {importances[i]:.4f}")
 
 
