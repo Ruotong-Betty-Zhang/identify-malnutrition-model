@@ -378,7 +378,6 @@ if __name__ == "__main__":
 
     evaluate_model(model, test_loader)
 
-    # 使用示例：
     feature_num = X_seqs[0].shape[1]
     importances = []
     for i in range(feature_num):
