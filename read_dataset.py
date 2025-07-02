@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
 import locale
-from utils import calculate_age, drop_columns, average_fill_empty, calculate_malnutrition, drop_cap_nutrition_rows, generate_gender_column_and_carelevel, check_missing_values, fill_missing_by_idno_and_mode, calculate_feature_changes
+from utils import calculate_age, drop_columns, average_fill_empty, calculate_malnutrition, drop_cap_nutrition_rows, generate_gender_column_and_carelevel, check_missing_values, fill_missing_by_idno_and_mode, calculate_feature_changes, knn_impute_missing_values,restore_integer_columns
 from dotenv import load_dotenv
 import os
 
@@ -43,7 +43,9 @@ df = drop_columns(df)
 
 # Generate cap df
 cap_df = drop_cap_nutrition_rows(df)
-cap_df = fill_missing_by_idno_and_mode(cap_df)
+# cap_df = fill_missing_by_idno_and_mode(cap_df)
+cap_df = knn_impute_missing_values(cap_df)
+cap_df = restore_integer_columns(cap_df, original_df=df)
 cap_df = calculate_malnutrition(cap_df)
 cap_df.to_pickle(target_folder + 'cap_data.pkl')
 # df = pd.read_pickle(target_folder + 'cap_data.pkl')
@@ -51,7 +53,9 @@ cap_df.to_pickle(target_folder + 'cap_data.pkl')
 # Generate mal df
 mal_df = calculate_malnutrition(df)
 mal_df = df.drop(columns=["iK2a", "iK2g", "iG3", "iE2a", "iE2b", "iE2c", "iI1c", "iI1d", "CAP_Nutrition"])
-mal_df = fill_missing_by_idno_and_mode(mal_df)
+# mal_df = fill_missing_by_idno_and_mode(mal_df)
+mal_df = knn_impute_missing_values(mal_df)
+mal_df = restore_integer_columns(mal_df,original_df=df)
 mal_df.to_pickle(target_folder + 'mal_data.pkl')
 # mal_df = pd.read_pickle(target_folder + 'mal_data.pkl')
 
