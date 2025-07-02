@@ -2,6 +2,8 @@ import pandas as pd
 from datetime import datetime
 import locale
 import numpy as np
+from sklearn.impute import KNNImputer
+from sklearn.preprocessing import StandardScaler
 
 def calculate_age(basic_info, extra_info):
     """Add Age column to basic_info DataFrame based on extra_info DataFrame."""
@@ -60,7 +62,7 @@ def generate_gender_column_and_carelevel(basic_info, extra_info):
 def drop_columns(df):
     """Return a DataFrame with unnecessary columns dropped."""
     # Drop all cols after iJ1g
-    columns_to_keep = ['iJ1g', 'iJ1h', 'iJ1i', 'iK1ab']
+    columns_to_keep = ['iJ1g', 'iJ1h', 'iJ1i', 'iJ12']
     start_index = df.columns.get_loc('iJ1g')
     cols_from_start = df.columns[start_index:]
     cols_to_drop = [col for col in cols_from_start if col not in columns_to_keep]
@@ -195,3 +197,59 @@ def calculate_feature_changes(df, exclude_columns=['IDno', 'Assessment_Date', 'M
         # Remove the first assessment for each patient, as it has no previous assessment to compare to
         changed_df = changed_df[changed_df['Assessment_Date'] != patient_data.iloc[0]['Assessment_Date']] 
     return changed_df
+
+def knn_impute_missing_values(df, exclude_cols=['IDno', 'Assessment_Date'], n_neighbors=5):
+    df = df.copy(deep=True)
+    # Only fill iJ12 (Recent Falls) based on iJ1g (Falls - In last 30 days)
+    print("Missing values in iJ12 before filling based on iJ1g:")
+    print(df['iJ12'].isna().sum())
+    mask = df['iJ12'].isna()  
+    df.loc[mask & df['iJ1g'].isin([1, 2]), 'iJ12'] = 1
+    df.loc[mask & df['iJ1g'].isin([0]), 'iJ12'] = 0
+    print("Number of missing values in iJ12 after filling based on iJ1g:")
+    print(df['iJ12'].isna().sum()) 
+
+
+    df_copy = df.copy(deep=True)
+
+    # Step 1: select columns to impute
+    impute_cols = [col for col in df.columns if col not in exclude_cols and df[col].dtype in [np.float64, np.int64]]
+
+    # Step 2: standardize the data
+    scaler = StandardScaler()
+    scaled_data = scaler.fit_transform(df_copy[impute_cols])
+
+    # Step 3: fit KNN imputer and transform the data
+    imputer = KNNImputer(n_neighbors=n_neighbors)
+    imputed_data = imputer.fit_transform(scaled_data)
+
+    # Step 4: inverse transform the imputed data and update the DataFrame
+    imputed_data_unscaled = scaler.inverse_transform(imputed_data)
+    df_copy[impute_cols] = imputed_data_unscaled
+
+    return df_copy
+
+def restore_integer_columns(df, original_df=None, manual_cols=None):
+
+    df_restored = df.copy()
+
+    auto_int_cols = []
+    if original_df is not None:
+        for col in df.columns:
+            if col in original_df.columns:
+                orig_col = original_df[col]
+                if pd.api.types.is_integer_dtype(orig_col) or (
+                    pd.api.types.is_numeric_dtype(orig_col) and
+                    orig_col.dropna().apply(float.is_integer).mean() > 0.95
+                ):
+                    auto_int_cols.append(col)
+
+    target_cols = set(auto_int_cols)
+    if manual_cols:
+        target_cols.update(manual_cols)
+
+    for col in target_cols:
+        if col in df_restored.columns:
+            df_restored[col] = df_restored[col].round().astype('Int64') 
+
+    return df_restored
