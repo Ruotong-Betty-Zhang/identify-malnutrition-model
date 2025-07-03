@@ -6,9 +6,10 @@ import joblib
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import classification_report, confusion_matrix
+import shap
 
 def split_cap_data(df):
-    cols_to_drop = [df.columns[0], df.columns[1], 'CAP_Nutrition', 'Scale_BMI']
+    cols_to_drop = [df.columns[0], df.columns[1], 'CAP_Nutrition', 'Scale_BMI', 'Cap_cognitive']
     X = df.drop(columns=cols_to_drop)
     if 'Malnutrition' in X.columns:
         X = X.drop(columns=['Malnutrition'])
@@ -103,6 +104,15 @@ def save_model(clf, X, filename):
     plt.tight_layout()
     plt.savefig(filename)
     plt.close()
+
+def use_shap_values(clf, X_train):
+    explainer = shap.Explainer(clf)
+    shap_values = explainer(X_train)
+    
+    plt.figure(figsize=(10, 6))
+    shap.summary_plot(shap_values, X_train, plot_type="bar")
+    plt.savefig("./image/xgboost_cap_shap_summary_plot.png", dpi=300, bbox_inches='tight')
+    plt.show()
     
 if __name__ == "__main__":
     df = pd.read_pickle("./datasets/cap_data.pkl")
@@ -117,6 +127,8 @@ if __name__ == "__main__":
     
     # Plot feature importance
     plot_feature_importance(clf, X_train, top_n=20)
+    # Use SHAP values for model interpretation
+    use_shap_values(clf, X_train)
     
     # Save the model to a file
     model_path = "./model/xgboost_cap_model.pkl"
