@@ -6,6 +6,7 @@ from sklearn.metrics import classification_report, accuracy_score, confusion_mat
 import joblib
 import matplotlib.pyplot as plt
 from xgboost import XGBClassifier, plot_importance
+from xgboost import plot_tree
 
 dataset_folder = "./datasets/"
 target_folder = "./outputs/"
@@ -107,3 +108,12 @@ plt.tight_layout()
 plt.savefig(target_folder + "cap_xgboost_plot_importance_long.png", dpi=300)
 plt.close()
 print("Saved as cap_xgboost_plot_importance_long.png")
+
+# 绘制具体的树结构
+num_trees = 0
+plt.figure(figsize=(20, 10))
+plot_tree(clf, num_trees=num_trees)  # num_trees=0 指定绘制第0棵树
+plt.tight_layout()
+plt.savefig(target_folder + "cap_xgboost_tree_" + num_trees + '.png', dpi=300)
+plt.close()
+print("Saved")

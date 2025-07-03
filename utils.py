@@ -186,11 +186,15 @@ def calculate_feature_changes(df, exclude_columns=['IDno', 'Assessment_Date', 'M
                 if column not in ['IDno', 'Assessment_Date', 'Malnutrition'] and '_change' not in column:
                     column_name = f"{column}_change"
 
-                    date_diff = (current_row['Assessment_Date'] - previous_row['Assessment_Date']).days
-                    if date_diff != 0:
-                        change = (current_row[column] - previous_row[column]) / date_diff
-                        column_name = f"{column}_change"
-                        changed_df.loc[(changed_df['IDno'] == patient_id) & (changed_df['Assessment_Date'] == current_row['Assessment_Date']), column_name] = change
+                    # date_diff = (current_row['Assessment_Date'] - previous_row['Assessment_Date']).days
+                    # if date_diff != 0:
+                    #     change = (current_row[column] - previous_row[column]) / date_diff
+                    #     column_name = f"{column}_change"
+                    #     changed_df.loc[(changed_df['IDno'] == patient_id) & (changed_df['Assessment_Date'] == current_row['Assessment_Date']), column_name] = change
+                    
+                    change = (current_row[column] - previous_row[column])
+                    column_name = f"{column}_change"
+                    changed_df.loc[(changed_df['IDno'] == patient_id) & (changed_df['Assessment_Date'] == current_row['Assessment_Date']), column_name] = change
 
         # Remove the first assessment for each patient, as it has no previous assessment to compare to
         changed_df = changed_df[changed_df['Assessment_Date'] != patient_data.iloc[0]['Assessment_Date']] 
