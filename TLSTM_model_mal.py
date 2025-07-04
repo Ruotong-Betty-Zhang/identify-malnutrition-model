@@ -13,7 +13,8 @@ from sklearn.utils.class_weight import compute_class_weight
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
-
+from sklearn.utils.class_weight import compute_class_weight
+from sklearn.metrics import roc_auc_score
 
 def set_seed(seed=42):
     torch.manual_seed(seed)
@@ -41,6 +42,7 @@ def prepare_sequence_data(df, id_col='IDno', time_col='Assessment_Date', target_
 
         # calculate time difference in days
         group_sorted['Time_Delta'] = group_sorted[time_col].diff().dt.days.fillna(0)
+        # Normalize time delta
         group_sorted['Time_Delta'] = group_sorted['Time_Delta'] / 180.0
 
 
@@ -238,7 +240,8 @@ def train_model_with_early_stopping(model, train_loader, val_loader, optimizer, 
                 batch_len = batch_len.to(device)
                 batch_y = batch_y.to(device)
                 logits = model(batch_x, batch_len)
-                preds = logits.argmax(dim=1)
+                probs = torch.softmax(logits, dim=1)
+                preds = (probs[:, 1] > 0.5).long()
                 val_preds.extend(preds.cpu().numpy())
                 val_labels.extend(batch_y.cpu().numpy())
         val_acc = accuracy_score(val_labels, val_preds)
@@ -257,21 +260,56 @@ def train_model_with_early_stopping(model, train_loader, val_loader, optimizer, 
 
     if best_model_state:
         model.load_state_dict(best_model_state)
+    
+    # evaluate on the validation set
+    model.eval()
+    all_preds, all_labels, all_probs = [], [], []
+    with torch.no_grad():
+        for batch_x, batch_len, batch_y in val_loader:
+            batch_x = batch_x.to(device)
+            batch_len = batch_len.to(device)
+            batch_y = batch_y.to(device)
+
+            logits = model(batch_x, batch_len)
+            probs = torch.softmax(logits, dim=1)
+            preds = (probs[:, 1] > 0.5).long()
+            probs = torch.softmax(logits, dim=1)[:, 1]
+        
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(batch_y.cpu().numpy())
+            all_probs.extend(probs.cpu().numpy())
+    acc = accuracy_score(all_labels, all_preds)
+    print(f"\nFinal Validation Accuracy: {acc:.4f}")
+    print("Classification Report:")
+    print(classification_report(all_labels, all_preds))
+    print("Confusion Matrix:")
+    print(confusion_matrix(all_labels, all_preds))
+    try:
+        roc_auc = roc_auc_score(all_labels, all_probs)
+        print(f"ROC AUC: {roc_auc:.4f}")
+    except ValueError:
+        print("ROC AUC could not be computed, likely due to insufficient positive/negative samples.")
     return model
 
 def evaluate_model(model, dataloader):
     model.eval()
     all_preds = []
     all_labels = []
+    all_probs = []
     with torch.no_grad():
         for batch_x, batch_len, batch_y in dataloader:
             batch_x = batch_x.to(device)
             batch_len = batch_len.to(device)
             batch_y = batch_y.to(device)
+
             logits = model(batch_x, batch_len)
-            preds = logits.argmax(dim=1)
+            probs = torch.softmax(logits, dim=1)
+            preds = (probs[:, 1] > 0.5).long()
+            probs = torch.softmax(logits, dim=1)[:, 1]  # Get probabilities for the positive class
+
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(batch_y.cpu().numpy())
+            all_probs.extend(probs.cpu().numpy())
 
     acc = accuracy_score(all_labels, all_preds)
     print(f"\nEvaluation Accuracy: {acc:.4f}")
@@ -280,7 +318,24 @@ def evaluate_model(model, dataloader):
     print("Confusion Matrix:")
     print(confusion_matrix(all_labels, all_preds))
 
+    try:
+        roc_auc = roc_auc_score(all_labels, all_probs)
+        print(f"ROC AUC: {roc_auc:.4f}")
+    except ValueError:
+        print("ROC AUC could not be computed, likely due to insufficient positive/negative samples.")
 
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=1, gamma=2, weight=None):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.weight = weight
+
+    def forward(self, inputs, targets):
+        ce_loss = nn.CrossEntropyLoss(weight=self.weight)(inputs, targets)
+        pt = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        return focal_loss
 
 def search_best_model(X_seqs, y_seqs, lengths, id_list):
     hidden_sizes = [32, 64, 128, 256]
@@ -313,13 +368,17 @@ def search_best_model(X_seqs, y_seqs, lengths, id_list):
                 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
                 y_np = np.array([y.item() for y in y_seqs])
-                class_weights = compute_class_weight('balanced', classes=np.unique(y_np), y=y_np)
+                class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(y_np), y=y_np)
+                class_weights[1] *= 1.2
                 weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
+                # loss_fn = FocalLoss(weight=weights_tensor)
                 loss_fn = nn.CrossEntropyLoss(weight=weights_tensor)
+
+
 
                 # Train the model
                 model = train_model_with_early_stopping(
-                    model, train_loader, test_loader, optimizer, loss_fn, num_epochs=100, patience=15
+                    model, train_loader, test_loader, optimizer, loss_fn, num_epochs=100, patience=200
                 )
                 
                 # Evaluate on test set
@@ -333,7 +392,8 @@ def search_best_model(X_seqs, y_seqs, lengths, id_list):
                         batch_len = batch_len.to(device)
                         batch_y = batch_y.to(device)
                         logits = model(batch_x, batch_len)
-                        preds = logits.argmax(dim=1)
+                        probs = torch.softmax(logits, dim=1)
+                        preds = (probs[:, 1] > 0.5).long()
                         all_preds.extend(preds.cpu().numpy())
                         all_labels.extend(batch_y.cpu().numpy())
 
@@ -342,7 +402,8 @@ def search_best_model(X_seqs, y_seqs, lengths, id_list):
                         batch_len = batch_len.to(device)
                         batch_y = batch_y.to(device)
                         logits = model(batch_x, batch_len)
-                        preds = logits.argmax(dim=1)
+                        probs = torch.softmax(logits, dim=1)
+                        preds = (probs[:, 1] > 0.5).long()
                         train_preds.extend(preds.cpu().numpy())
                         train_labels.extend(batch_y.cpu().numpy())
 
@@ -372,7 +433,8 @@ def search_best_model(X_seqs, y_seqs, lengths, id_list):
             batch_len = batch_len.to(device)
             batch_y = batch_y.to(device)
             logits = best_model(batch_x, batch_len)
-            preds = logits.argmax(dim=1)
+            probs = torch.softmax(logits, dim=1)
+            preds = (probs[:, 1] > 0.5).long()
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(batch_y.cpu().numpy())
 
@@ -400,7 +462,8 @@ def permutation_feature_importance(model, dataset, feature_idx, batch_size=32):
             batch_len = batch_len.to(device)
             batch_y = batch_y.to(device)
             logits = model(batch_x, batch_len)
-            preds = logits.argmax(dim=1)
+            probs = torch.softmax(logits, dim=1)
+            preds = (probs[:, 1] > 0.5).long()
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(batch_y.cpu().numpy())
     baseline_acc = accuracy_score(all_labels, all_preds)
@@ -417,7 +480,8 @@ def permutation_feature_importance(model, dataset, feature_idx, batch_size=32):
             batch_x_perm[:,:,feature_idx] = permuted.view(batch_x_perm.size(0), batch_x_perm.size(1))
             
             logits = model(batch_x_perm, batch_len)
-            preds = logits.argmax(dim=1)
+            probs = torch.softmax(logits, dim=1)
+            preds = (probs[:, 1] > 0.5).long()
             all_preds_perm.extend(preds.cpu().numpy())
             all_labels_perm.extend(batch_y.cpu().numpy())
     permuted_acc = accuracy_score(all_labels_perm, all_preds_perm)
