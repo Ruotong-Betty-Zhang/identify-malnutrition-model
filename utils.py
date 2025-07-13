@@ -62,7 +62,7 @@ def generate_gender_column_and_carelevel(basic_info, extra_info):
 def drop_columns(df):
     """Return a DataFrame with unnecessary columns dropped."""
     # Drop all cols after iJ1g
-    columns_to_keep = ['iJ1g', 'iJ1h', 'iJ1i', 'iJ12']
+    columns_to_keep = ['iJ1g', 'iJ1h', 'iJ1i', 'iJ12', 'Age', 'Gender', 'CareLevel']
     start_index = df.columns.get_loc('iJ1g')
     cols_from_start = df.columns[start_index:]
     cols_to_drop = [col for col in cols_from_start if col not in columns_to_keep]
@@ -153,7 +153,25 @@ def fill_missing_by_idno_and_mode(df, id_column='IDno'):
     return result_df
 
 # For every patient with the same IDno, calculate the change in each features compare to the last assessment divided by the day passed
-def calculate_feature_changes(df, exclude_columns=['IDno', 'Assessment_Date', 'Malnutrition', 'CAP_Nutrition']):
+def calculate_feature_changes(df, exclude_columns=['IDno', 'Assessment_Date', 'Malnutrition', 'CAP_Nutrition'], include_columns=[
+    'iK1ab',
+    'iK1bb',
+    "Scale_ADLHierarchy",
+    "Scale_ADLLongForm",
+    "Scale_ADLShortForm",
+    "Scale_AggressiveBehaviour",
+    "Scale_BMI",
+    "Scale_CHESS",
+    "Scale_Communication",
+    "Scale_CPS",
+    "Scale_DRS",
+    "Scale_IADLCapacity",
+    "Scale_IADLPerformance",
+    "Scale_MAPLE",
+    "Scale_Pain",
+    "Scale_PressureUlcerRisk",
+    "OverallUrgencyScale"
+]):
     """
     For every patient with the same IDno, calculate the change in each features compare to the last assessment divided by the day passed\n
     :param df: DataFrame containing the patient data\n
@@ -185,7 +203,7 @@ def calculate_feature_changes(df, exclude_columns=['IDno', 'Assessment_Date', 'M
 
             # Calculate the change in each feature
             for column in changed_df.columns:
-                if column not in ['IDno', 'Assessment_Date', 'Malnutrition'] and '_change' not in column:
+                if column not in ['IDno', 'Assessment_Date', 'Malnutrition'] and '_change' not in column and (include_columns == None or column in include_columns):
                     column_name = f"{column}_change"
 
                     # date_diff = (current_row['Assessment_Date'] - previous_row['Assessment_Date']).days
@@ -257,3 +275,20 @@ def restore_integer_columns(df, original_df=None, manual_cols=None):
             df_restored[col] = df_restored[col].round().astype('Int64') 
 
     return df_restored
+
+def generate_model_input_list(df, save_path=None):
+    """Generate a list of columns in the DataFrame in form of json."""
+    # Save the column names in a list
+    column_list = df.columns.tolist()
+    # Convert the list to a JSON string
+    column_list_json = ', '.join(f'"{col}"' for col in column_list)
+
+    # Save to a file
+    if save_path:
+        with open(save_path, 'w') as f:
+            f.write(f'[{column_list_json}]')
+        print(f"Column list saved to {save_path}")
+    else:
+        print("Column list not saved, no path provided.")
+    # Return the JSON string
+    return f'[{column_list_json}]'

@@ -57,6 +57,8 @@ mal_df = df.drop(columns=["iK2a", "iK2g", "iG3", "iE2a", "iE2b", "iE2c", "iI1c",
 mal_df = knn_impute_missing_values(mal_df)
 mal_df = restore_integer_columns(mal_df,original_df=df)
 mal_df.to_pickle(target_folder + 'mal_data.pkl')
+
+# cap_df = pd.read_pickle(target_folder + 'cap_data.pkl')
 # mal_df = pd.read_pickle(target_folder + 'mal_data.pkl')
 
 # Generate longitudinal df
