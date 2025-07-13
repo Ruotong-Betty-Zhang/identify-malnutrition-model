@@ -4,6 +4,8 @@ import locale
 import numpy as np
 from sklearn.impute import KNNImputer
 from sklearn.preprocessing import StandardScaler
+from sklearn.neighbors import KNeighborsClassifier
+from pandas.api.types import is_numeric_dtype
 
 def calculate_age(basic_info, extra_info):
     """Add Age column to basic_info DataFrame based on extra_info DataFrame."""
@@ -52,17 +54,28 @@ def calculate_age(basic_info, extra_info):
     return basic_info
 
 def generate_gender_column_and_carelevel(basic_info, extra_info):
-    basic_info['Gender'] = extra_info['Q2Gender']
-    mapping = {'Hospital': 3, 'Dementia Unit': 2, 'Rest Home': 1}
-    basic_info['CareLevel'] = extra_info['CareLevel'].map(mapping)
-    print(basic_info[['CareLevel', 'Gender']].head(10))
-    return basic_info
+    # For every IDno, find the gender in extra_info['Q2Gender'] and care level in extra_info['CareLevel']
+    # Initialize the Gender and CareLevel columns in basic_info
+    basic_info['Gender'] = None
+    basic_info['CareLevel'] = None
+    for index, row in basic_info.iterrows():
+        idno = row["IDno"]
+        # Find the row in extra_info with the same IDno
+        extra_row = extra_info[extra_info["IDNo"] == idno]
+        if not extra_row.empty:
+            # Set the gender and care level
+            basic_info.at[index, 'Gender'] = extra_row.iloc[0]['Q2Gender']
+            care_level = extra_row.iloc[0]['CareLevel']
+            mapping = {'Hospital': 3, 'Dementia Unit': 2, 'Rest Home': 1, 'RH': 1}
+            basic_info.at[index, 'CareLevel'] = mapping.get(care_level, None)
 
+    print(basic_info[['IDno','CareLevel', 'Gender']].head(10))
+    return basic_info
 
 def drop_columns(df):
     """Return a DataFrame with unnecessary columns dropped."""
     # Drop all cols after iJ1g
-    columns_to_keep = ['iJ1g', 'iJ1h', 'iJ1i', 'iJ12']
+    columns_to_keep = ['iJ1g', 'iJ1h', 'iJ1i', 'iJ12', 'iJ1', 'Age', 'Gender', 'CareLevel']
     start_index = df.columns.get_loc('iJ1g')
     cols_from_start = df.columns[start_index:]
     cols_to_drop = [col for col in cols_from_start if col not in columns_to_keep]
@@ -226,6 +239,58 @@ def knn_impute_missing_values(df, exclude_cols=['IDno', 'Assessment_Date'], n_ne
     # Step 4: inverse transform the imputed data and update the DataFrame
     imputed_data_unscaled = scaler.inverse_transform(imputed_data)
     df_copy[impute_cols] = imputed_data_unscaled
+
+    print(f"✅ KNN imputation completed for {len(impute_cols)} columns with {n_neighbors} neighbors.")
+    return df_copy
+
+def knn_Classifier(df, exclude_cols=['IDno', 'Assessment_Date'], n_neighbors=5):
+    df_copy = df.copy(deep=True)
+    # Only fill iJ12 (Recent Falls) based on iJ1g (Falls - In last 30 days)
+    print("Missing values in iJ12 before filling based on iJ1g:")
+    print(df_copy['iJ12'].isna().sum())
+    mask = df_copy['iJ12'].isna()  
+    df_copy.loc[mask & df_copy['iJ1g'].isin([1, 2]), 'iJ12'] = 1
+    df_copy.loc[mask & df_copy['iJ1g'].isin([0]), 'iJ12'] = 0
+    print("Number of missing values in iJ12 after filling based on iJ1g:")
+    print(df_copy['iJ12'].isna().sum()) 
+
+    target_cols = [
+        col for col in df_copy.columns
+        if col not in exclude_cols 
+        and is_numeric_dtype(df_copy[col]) 
+        and df_copy[col].isna().sum() > 0
+    ]
+
+    print(f"🧩 Target columns to impute with KNN: {target_cols}")
+
+    for target_col in target_cols:
+        # Use only complete features (no NaNs) as input for KNN
+        feature_cols = [
+            col for col in df_copy.columns 
+            if col not in exclude_cols + [target_col]
+            and is_numeric_dtype(df_copy[col])
+            and df_copy[col].isna().sum() == 0
+        ]
+
+        if not feature_cols:
+            print(f"⚠️ No complete features to impute '{target_col}', skipping.")
+            continue
+
+        train_df = df_copy[df_copy[target_col].notna()]
+        test_df = df_copy[df_copy[target_col].isna()]
+
+        if test_df.empty:
+            print(f"✅ No missing in '{target_col}', skipping.")
+            continue
+
+        # Fit KNN classifier
+        knn = KNeighborsClassifier(n_neighbors=n_neighbors)
+        knn.fit(train_df[feature_cols], train_df[target_col].astype(int))
+
+        predicted = knn.predict(test_df[feature_cols])
+        df_copy.loc[test_df.index, target_col] = predicted
+
+        print(f"✅ Filled {len(predicted)} values in '{target_col}' using KNN Classifier.")
 
     return df_copy
 
