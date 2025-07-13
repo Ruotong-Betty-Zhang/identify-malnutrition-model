@@ -9,7 +9,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 import shap
 
 def split_cap_data(df):
-    cols_to_drop = [df.columns[0], df.columns[1], 'CAP_Nutrition', 'Scale_BMI', 'Cap_cognitive']
+    cols_to_drop = [df.columns[0], df.columns[1], 'CAP_Nutrition', 'Scale_BMI']
     X = df.drop(columns=cols_to_drop)
     if 'Malnutrition' in X.columns:
         X = X.drop(columns=['Malnutrition'])
