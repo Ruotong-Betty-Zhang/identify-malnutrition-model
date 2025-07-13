@@ -506,43 +506,43 @@ if __name__ == "__main__":
     df['Malnutrition'] = df['Malnutrition'].apply(lambda x: 0 if x in [0, 1, 2] else 1)
     
     X_seqs, y_seqs, lengths, id_list = prepare_sequence_data(df)
-    best_model, best_config = search_best_model(X_seqs, y_seqs, lengths, id_list)
+    # best_model, best_config = search_best_model(X_seqs, y_seqs, lengths, id_list)
     
-    # (train_X, train_y, train_len), (test_X, test_y, test_len) = split_sequence_dataset_by_id(X_seqs, y_seqs, lengths, id_list)
+    (train_X, train_y, train_len), (test_X, test_y, test_len) = split_sequence_dataset_by_id(X_seqs, y_seqs, lengths, id_list)
 
-    # hidden_size = 64
-    # learning_rate = 0.0005
-    # batch_size = 32
+    hidden_size = 32
+    learning_rate = 0.001
+    batch_size = 32
 
-    # train_dataset = MalnutritionDataset(train_X, train_y)
-    # test_dataset = MalnutritionDataset(test_X, test_y)
+    train_dataset = MalnutritionDataset(train_X, train_y)
+    test_dataset = MalnutritionDataset(test_X, test_y)
 
-    # train_loader = DataLoader(train_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=True)
-    # test_loader = DataLoader(test_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False)
-    # y_np = np.array([y.item() for y in y_seqs])
-    # model = TLSTMModel(input_size=X_seqs[0].shape[1], hidden_size=hidden_size, num_classes=len(np.unique(y_np))).to(device)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False)
+    y_np = np.array([y.item() for y in y_seqs])
+    model = TLSTMModel(input_size=X_seqs[0].shape[1], hidden_size=hidden_size, num_classes=len(np.unique(y_np))).to(device)
 
-    # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     
 
-    # class_weights = compute_class_weight('balanced', classes=np.unique(y_np), y=y_np)
-    # weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
-    # loss_fn = nn.CrossEntropyLoss(weight=weights_tensor)
+    class_weights = compute_class_weight('balanced', classes=np.unique(y_np), y=y_np)
+    weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
+    loss_fn = nn.CrossEntropyLoss(weight=weights_tensor)
 
-    # model = train_model_with_early_stopping(model, train_loader, test_loader, optimizer, loss_fn, num_epochs=100, patience=15)
+    model = train_model_with_early_stopping(model, train_loader, test_loader, optimizer, loss_fn, num_epochs=1000, patience=1000)
 
-    # evaluate_model(model, test_loader)
+    evaluate_model(model, test_loader)
 
-    # feature_num = X_seqs[0].shape[1]
-    # importances = []
-    # for i in range(feature_num):
-    #     imp = permutation_feature_importance(model, test_dataset, i)
-    #     importances.append(imp)
+    feature_num = X_seqs[0].shape[1]
+    importances = []
+    for i in range(feature_num):
+        imp = permutation_feature_importance(model, test_dataset, i)
+        importances.append(imp)
 
-    # feature_cols = [col for col in df.columns if col not in ['IDno', 'Assessment_Date', 'CAP_Nutrition']]
+    feature_cols = [col for col in df.columns if col not in ['IDno', 'Assessment_Date', 'CAP_Nutrition']]
 
-    # sorted_idx = np.argsort(importances)[::-1]
-    # for i in sorted_idx[:10]:
-    #     print(f"Feature {feature_cols[i]} importance: {importances[i]:.4f}")
+    sorted_idx = np.argsort(importances)[::-1]
+    for i in sorted_idx[:10]:
+        print(f"Feature {feature_cols[i]} importance: {importances[i]:.4f}")
 
 
