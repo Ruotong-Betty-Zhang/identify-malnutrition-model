@@ -8,51 +8,49 @@ from sklearn.neighbors import KNeighborsClassifier
 from pandas.api.types import is_numeric_dtype
 
 def calculate_age(basic_info, extra_info):
-    """Add Age column to basic_info DataFrame based on extra_info DataFrame."""
-	# Use the IDNo, Date1, Q4Age_BL columns to create a new DataFrame
-    tempDf = extra_info[["IDNo", "Date1", "Q4Age_BL"]]
-    locale.setlocale(locale.LC_TIME, 'C')
+    """
+    Calculate and assign Age to basic_info based on Date of Birth (Q3DoB) or baseline age (Q4Age_BL).
+    
+    Priority:
+    1. If Q3DoB is available, calculate age using Q3DoB and Assessment_Date.
+    2. If Q3DoB is missing, estimate age using Q4Age_BL + time difference from baseline (Date1).
+    """
+    # Ensure date columns are in datetime format
+    extra_info["Date1"] = pd.to_datetime(extra_info["Date1"], format="%d%b%Y", errors="coerce")
+    extra_info["Q3DoB"] = pd.to_datetime(extra_info["Q3DoB"], format="%d%b%Y", errors="coerce")
+    basic_info["Assessment_Date"] = pd.to_datetime(basic_info["Assessment_Date"], format="%d%b%Y", errors="coerce")
 
-    # Go through each row in the DataFrame
-    for index, row in tempDf.iterrows():
-        # Convert the date string to a datetime object
-        date_str = row["Date1"]
-        date_obj = datetime.strptime(date_str, "%d%b%Y")
+    # Merge extra info into basic_info
+    merged_df = pd.merge(
+        basic_info,
+        extra_info[["IDNo", "Q3DoB", "Q4Age_BL", "Date1"]],
+        how="left",
+        left_on="IDno",
+        right_on="IDNo"
+    )
 
-        # Extract the year and month
-        year = date_obj.year
-        month = date_obj.month
-        age = row["Q4Age_BL"]
-        if not age or age <= 0:
-            basic_info.at[index, "Age"] = None
-            continue
+    # Age calculation
+    def compute_age(row):
+        if pd.notnull(row["Q3DoB"]):
+            # If Date of Birth is available, use it directly
+            delta = row["Assessment_Date"] - row["Q3DoB"]
+            return round(delta.days / 365.25, 2)
+        elif pd.notnull(row["Q4Age_BL"]) and pd.notnull(row["Date1"]):
+            # If only baseline age is available, estimate using years from Date1
+            delta = row["Assessment_Date"] - row["Date1"]
+            return round(row["Q4Age_BL"] + delta.days / 365.25, 2)
+        else:
+            return np.nan
 
-        seen = False
-        for index2, row2 in basic_info.iterrows():
-            # Check if the IDNo and month are the same
-            if seen and row["IDNo"] != row2["IDno"]:
-                break
-            if row["IDNo"] == row2["IDno"]:
-                date_str2 = row2["Assessment_Date"]
-                date_obj2 = datetime.strptime(date_str2, "%d%b%Y")
-                year2 = date_obj2.year
-                month2 = date_obj2.month
+    merged_df["Age"] = merged_df.apply(compute_age, axis=1)
 
-                yearDiff = year2 - year
-                monthDiff = month2 - month
-                # Use the years and months to calculate age in df1
-                age2 = age + yearDiff + monthDiff / 12
-                # Add the age to the DataFrame
-                basic_info.at[index2, "Age"] = age2
-                seen = True
+    # Drop helper columns if needed
+    result_df = merged_df.drop(columns=["IDNo", "Q3DoB", "Q4Age_BL", "Date1"])
 
-    # If age is below 0, set it to None
-    basic_info.loc[basic_info["Age"] < 0, "Age"] = None
+    # Optional: Preview
+    print(result_df[["IDno", "Assessment_Date", "Age"]].head(10))
 
-    # Print the age of the first 10 patients
-    print(basic_info[["IDno", "Age"]].head(10))
-    return basic_info
-
+    return result_df
 def generate_gender_column_and_carelevel(basic_info, extra_info):
     # For every IDno, find the gender in extra_info['Q2Gender'] and care level in extra_info['CareLevel']
     # Initialize the Gender and CareLevel columns in basic_info
