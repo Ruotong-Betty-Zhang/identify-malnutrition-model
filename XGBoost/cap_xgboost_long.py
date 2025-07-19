@@ -6,9 +6,14 @@ from sklearn.metrics import classification_report, accuracy_score, confusion_mat
 import joblib
 import matplotlib.pyplot as plt
 from xgboost import XGBClassifier, plot_importance
+from xgboost import plot_tree
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from utils import generate_model_input_list
 
 dataset_folder = "./datasets/"
 target_folder = "./outputs/"
+model_name = "cap_xgboost_plot_importance_long"
 print(XGBClassifier().get_params())
 
 if not os.path.exists(target_folder):
@@ -21,11 +26,12 @@ seed = 42
 cap_df = pd.read_pickle(dataset_folder + 'cap_long_data.pkl')
 print(f"CAP DataFrame shape: {cap_df.shape}")
 cap_df['Malnutrition'] = cap_df['Malnutrition'].apply(lambda x: 0 if x in [0, 1, 2] else 1)
-cap_df = cap_df.drop(columns=['IDno', 'Assessment_Date', 'Scale_BMI', 'Scale_BMI_change', 'CAP_Nutrition_change'])
+cap_df = cap_df.drop(columns=['IDno', 'Assessment_Date', 'Scale_BMI', 'Scale_BMI_change'])
 
 # Assign X and y
 X = cap_df.drop(columns=["CAP_Nutrition"])
 y = cap_df["CAP_Nutrition"]
+generate_model_input_list(X, target_folder + model_name + ".json")
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=seed)
 print(f"Training set size: {X_train.shape[0]}")
@@ -95,7 +101,7 @@ top_importances = importances[top_indices]
 # print("Saved top 12 feature importance plot as cap_xgb_top_12_features.png")
 
 # 模型保存
-model_path = os.path.join(target_folder, 'cap_xgboost_model_long.pkl')
+model_path = os.path.join(target_folder, model_name + '.pkl')
 joblib.dump(clf, model_path)
 print(f"Model saved to {model_path}")
 
@@ -104,6 +110,6 @@ plt.figure(figsize=(12, 8))
 
 plot_importance(clf, max_num_features=12, importance_type='gain')
 plt.tight_layout()
-plt.savefig(target_folder + "cap_xgboost_plot_importance_long.png", dpi=300)
+plt.savefig(target_folder + model_name +  model_name + ".png", dpi=300)
 plt.close()
-print("Saved as cap_xgboost_plot_importance_long.png")
+print(f'Saved as {model_name}.png')

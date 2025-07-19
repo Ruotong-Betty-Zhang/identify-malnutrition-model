@@ -164,7 +164,25 @@ def fill_missing_by_idno_and_mode(df, id_column='IDno'):
     return result_df
 
 # For every patient with the same IDno, calculate the change in each features compare to the last assessment divided by the day passed
-def calculate_feature_changes(df, exclude_columns=['IDno', 'Assessment_Date', 'Malnutrition', 'CAP_Nutrition']):
+def calculate_feature_changes(df, exclude_columns=['IDno', 'Assessment_Date', 'Malnutrition', 'CAP_Nutrition'], include_columns=[
+    'iK1ab',
+    'iK1bb',
+    "Scale_ADLHierarchy",
+    "Scale_ADLLongForm",
+    "Scale_ADLShortForm",
+    "Scale_AggressiveBehaviour",
+    "Scale_BMI",
+    "Scale_CHESS",
+    "Scale_Communication",
+    "Scale_CPS",
+    "Scale_DRS",
+    "Scale_IADLCapacity",
+    "Scale_IADLPerformance",
+    "Scale_MAPLE",
+    "Scale_Pain",
+    "Scale_PressureUlcerRisk",
+    "OverallUrgencyScale"
+]):
     """
     For every patient with the same IDno, calculate the change in each features compare to the last assessment divided by the day passed\n
     :param df: DataFrame containing the patient data\n
@@ -196,14 +214,18 @@ def calculate_feature_changes(df, exclude_columns=['IDno', 'Assessment_Date', 'M
 
             # Calculate the change in each feature
             for column in changed_df.columns:
-                if column not in ['IDno', 'Assessment_Date', 'Malnutrition'] and '_change' not in column:
+                if column not in ['IDno', 'Assessment_Date', 'Malnutrition'] and '_change' not in column and (include_columns == None or column in include_columns):
                     column_name = f"{column}_change"
 
-                    date_diff = (current_row['Assessment_Date'] - previous_row['Assessment_Date']).days
-                    if date_diff != 0:
-                        change = (current_row[column] - previous_row[column]) / date_diff
-                        column_name = f"{column}_change"
-                        changed_df.loc[(changed_df['IDno'] == patient_id) & (changed_df['Assessment_Date'] == current_row['Assessment_Date']), column_name] = change
+                    # date_diff = (current_row['Assessment_Date'] - previous_row['Assessment_Date']).days
+                    # if date_diff != 0:
+                    #     change = (current_row[column] - previous_row[column]) / date_diff
+                    #     column_name = f"{column}_change"
+                    #     changed_df.loc[(changed_df['IDno'] == patient_id) & (changed_df['Assessment_Date'] == current_row['Assessment_Date']), column_name] = change
+                    
+                    change = (current_row[column] - previous_row[column])
+                    column_name = f"{column}_change"
+                    changed_df.loc[(changed_df['IDno'] == patient_id) & (changed_df['Assessment_Date'] == current_row['Assessment_Date']), column_name] = change
 
         # Remove the first assessment for each patient, as it has no previous assessment to compare to
         changed_df = changed_df[changed_df['Assessment_Date'] != patient_data.iloc[0]['Assessment_Date']] 
@@ -316,3 +338,20 @@ def restore_integer_columns(df, original_df=None, manual_cols=None):
             df_restored[col] = df_restored[col].round().astype('Int64') 
 
     return df_restored
+
+def generate_model_input_list(df, save_path=None):
+    """Generate a list of columns in the DataFrame in form of json."""
+    # Save the column names in a list
+    column_list = df.columns.tolist()
+    # Convert the list to a JSON string
+    column_list_json = ', '.join(f'"{col}"' for col in column_list)
+
+    # Save to a file
+    if save_path:
+        with open(save_path, 'w') as f:
+            f.write(f'[{column_list_json}]')
+        print(f"Column list saved to {save_path}")
+    else:
+        print("Column list not saved, no path provided.")
+    # Return the JSON string
+    return f'[{column_list_json}]'
