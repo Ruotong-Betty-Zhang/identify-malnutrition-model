@@ -507,8 +507,12 @@ if __name__ == "__main__":
     
     X_seqs, y_seqs, lengths, id_list = prepare_sequence_data(df)
     # best_model, best_config = search_best_model(X_seqs, y_seqs, lengths, id_list)
+    print(f"Total sequences: {len(X_seqs)}")
+    print(f"Total labels: {len(y_seqs)}")
     
     (train_X, train_y, train_len), (test_X, test_y, test_len) = split_sequence_dataset_by_id(X_seqs, y_seqs, lengths, id_list)
+    print(f"Train sequences: {len(train_X)}, Test sequences: {len(test_X)}")
+    print(f"Train labels: {len(train_y)}, Test labels: {len(test_y)}")
 
     hidden_size = 32
     learning_rate = 0.001
@@ -529,20 +533,20 @@ if __name__ == "__main__":
     weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
     loss_fn = nn.CrossEntropyLoss(weight=weights_tensor)
 
-    model = train_model_with_early_stopping(model, train_loader, test_loader, optimizer, loss_fn, num_epochs=1000, patience=1000)
+    # model = train_model_with_early_stopping(model, train_loader, test_loader, optimizer, loss_fn, num_epochs=1000, patience=1000)
 
-    evaluate_model(model, test_loader)
+    # evaluate_model(model, test_loader)
 
-    feature_num = X_seqs[0].shape[1]
-    importances = []
-    for i in range(feature_num):
-        imp = permutation_feature_importance(model, test_dataset, i)
-        importances.append(imp)
+    # feature_num = X_seqs[0].shape[1]
+    # importances = []
+    # for i in range(feature_num):
+    #     imp = permutation_feature_importance(model, test_dataset, i)
+    #     importances.append(imp)
 
-    feature_cols = [col for col in df.columns if col not in ['IDno', 'Assessment_Date', 'CAP_Nutrition']]
+    # feature_cols = [col for col in df.columns if col not in ['IDno', 'Assessment_Date', 'CAP_Nutrition']]
 
-    sorted_idx = np.argsort(importances)[::-1]
-    for i in sorted_idx[:10]:
-        print(f"Feature {feature_cols[i]} importance: {importances[i]:.4f}")
+    # sorted_idx = np.argsort(importances)[::-1]
+    # for i in sorted_idx[:10]:
+    #     print(f"Feature {feature_cols[i]} importance: {importances[i]:.4f}")
 
 

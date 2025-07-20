@@ -326,6 +326,30 @@ def permutation_feature_importance(model, dataset, feature_idx, device):
     drop = baseline - get_accuracy(shuffled_model)
     return drop
 
+# 在训练前检查数据是否包含 NaN 或 Inf
+def check_data_for_nan_inf(seqs, labels):
+    for i, seq in enumerate(seqs):
+        if torch.isnan(seq).any() or torch.isinf(seq).any():
+            print(f"⚠️ Sequence {i} contains NaN or Inf")
+    for i, label in enumerate(labels):
+        if torch.isnan(label).any() or torch.isinf(label).any():
+            print(f"⚠️ Label {i} contains NaN or Inf")
+
+def inspect_sequence(seq_tensor, feature_names):
+    df = pd.DataFrame(seq_tensor.numpy(), columns=feature_names)
+    print(df.isna().sum())
+    print(df[df.isna().any(axis=1)])
+    print(df)
+
+def remove_invalid_sequences(seqs, labels, id_indices):
+    new_seqs, new_labels, new_ids = [], [], []
+    for s, l, i in zip(seqs, labels, id_indices):
+        if not torch.isnan(s).any() and not torch.isinf(s).any():
+            new_seqs.append(s)
+            new_labels.append(l)
+            new_ids.append(i)
+    return new_seqs, new_labels, new_ids
+
 # ---------------------------
 # Main
 # ---------------------------
@@ -333,16 +357,21 @@ if __name__ == '__main__':
     set_seed(42)
     device = torch.device("cpu")
 
-    df = pd.read_pickle("./datasets/cap_data.pkl")
+    df = pd.read_pickle("./datasets/CAP_1.pkl")
+    print(f"Data shape: {df.shape}")
     seqs, labels, ids, feature_cols = prepare_sequence_data_split_state(df)
+    print(f"sequences: {len(seqs)}")
     (train_seqs, train_labels, train_id_indices), (test_seqs, test_labels, test_id_indices), id_to_idx = split_dataset_by_id_with_id_index(seqs, labels, ids)
     print(f"Train sequences: {len(train_seqs)}, Test sequences: {len(test_seqs)}")
+    # inspect_sequence(train_seqs[149], feature_cols)
 
     train_dataset = MalnutritionDatasetWithID(train_seqs, train_labels, train_id_indices)
     test_dataset = MalnutritionDatasetWithID(test_seqs, test_labels, test_id_indices)
 
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, collate_fn=collate_fn_with_id)
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, collate_fn=collate_fn_with_id)
+
+    check_data_for_nan_inf(train_seqs, train_labels)
 
     num_classes = len(np.unique([y.item() for y in labels]))
     input_size = train_seqs[0].shape[1]
@@ -362,8 +391,8 @@ if __name__ == '__main__':
     weight_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
     loss_fn = nn.CrossEntropyLoss(weight=weight_tensor)
 
-    # model = train_model(model, train_loader, test_loader, optimizer, loss_fn, device)
-    # evaluate_model(model, test_loader, device, num_classes=num_classes)
+    model = train_model(model, train_loader, test_loader, optimizer, loss_fn, device)
+    evaluate_model(model, test_loader, device, num_classes=num_classes)
 
     # Plot top-10 permutation importance
     # importances = [permutation_feature_importance(model, MalnutritionDataset(test_X, test_y), i, device) for i in range(input_size)]
@@ -374,3 +403,4 @@ if __name__ == '__main__':
     # plt.xlabel("Accuracy Drop")
     # plt.tight_layout()
     # plt.show()
+
