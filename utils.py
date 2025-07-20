@@ -355,3 +355,9 @@ def generate_model_input_list(df, save_path=None):
         print("Column list not saved, no path provided.")
     # Return the JSON string
     return f'[{column_list_json}]'
+
+def combine_malnutrition_labels(mal_df):
+    temp_df = mal_df.copy()
+    # Combine the malnutrition labels into binary values
+    temp_df['Malnutrition'] = temp_df['Malnutrition'].apply(lambda x: 0 if x in [0, 1, 2] else 1)
+    return temp_df
