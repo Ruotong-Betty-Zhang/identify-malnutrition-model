@@ -51,24 +51,48 @@ def calculate_age(basic_info, extra_info):
     print(result_df[["IDno", "Assessment_Date", "Age"]].head(10))
 
     return result_df
-def generate_gender_column_and_carelevel(basic_info, extra_info):
-    # For every IDno, find the gender in extra_info['Q2Gender'] and care level in extra_info['CareLevel']
-    # Initialize the Gender and CareLevel columns in basic_info
-    basic_info['Gender'] = None
-    basic_info['CareLevel'] = None
-    for index, row in basic_info.iterrows():
-        idno = row["IDno"]
-        # Find the row in extra_info with the same IDno
-        extra_row = extra_info[extra_info["IDNo"] == idno]
-        if not extra_row.empty:
-            # Set the gender and care level
-            basic_info.at[index, 'Gender'] = extra_row.iloc[0]['Q2Gender']
-            care_level = extra_row.iloc[0]['CareLevel']
-            mapping = {'Hospital': 3, 'Dementia Unit': 2, 'Rest Home': 1, 'RH': 1}
-            basic_info.at[index, 'CareLevel'] = mapping.get(care_level, None)
+# def generate_gender_column_and_carelevel(basic_info, extra_info):
+#     # For every IDno, find the gender in extra_info['Q2Gender'] and care level in extra_info['CareLevel']
+#     # Initialize the Gender and CareLevel columns in basic_info
+#     basic_info['Gender'] = None
+#     basic_info['CareLevel'] = None
+#     for index, row in basic_info.iterrows():
+#         idno = row["IDno"]
+#         # Find the row in extra_info with the same IDno
+#         extra_row = extra_info[extra_info["IDNo"] == idno]
+#         if not extra_row.empty:
+#             # Set the gender and care level
+#             basic_info.at[index, 'Gender'] = extra_row.iloc[0]['Q2Gender']
+#             care_level = extra_row.iloc[0]['CareLevel']
+#             mapping = {'Hospital': 3, 'Dementia Unit': 2, 'Rest Home': 1, 'RH': 1}
+#             basic_info.at[index, 'CareLevel'] = mapping.get(care_level, None)
 
-    print(basic_info[['IDno','CareLevel', 'Gender']].head(10))
-    return basic_info
+#     print(basic_info[['IDno','CareLevel', 'Gender']].head(10))
+#     return basic_info
+
+def generate_gender_column_and_carelevel(basic_info: pd.DataFrame, extra_info: pd.DataFrame) -> pd.DataFrame:
+    # CareLevel 映射规则
+    carelevel_map = {'Hospital': 3, 'Dementia Unit': 2, 'Rest Home': 1, 'RH': 1}
+
+    # 选择需要的列并重命名
+    extra_info_subset = extra_info[['IDNo', 'Q2Gender', 'CareLevel']].copy()
+    extra_info_subset = extra_info_subset.rename(columns={
+        'IDNo': 'IDno',
+        'Q2Gender': 'Gender'
+    })
+
+    # 合并 basic_info 和 extra_info（按 IDno）
+    merged = basic_info.merge(extra_info_subset, on='IDno', how='left')
+
+    # 映射 CareLevel 为数字
+    merged['CareLevel'] = merged['CareLevel'].map(carelevel_map)
+
+    # 补全缺失值并转为整数（可选，也可以不填）
+    merged['Gender'] = pd.to_numeric(merged['Gender'], errors='coerce').fillna(-1).astype(int)
+    merged['CareLevel'] = merged['CareLevel'].fillna(-1).astype(int)
+
+    print(merged[['IDno', 'Gender', 'CareLevel']].head(10))
+    return merged
 
 def drop_columns(df):
     """Return a DataFrame with unnecessary columns dropped."""

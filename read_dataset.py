@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 import os
 
 # Use password in .env
-load_dotenv()
+load_dotenv(dotenv_path=".env", override=True)
 # Reading an encrypted Excel file
 password = os.getenv("PASSWORD")
 encrypted_file_path = os.getenv("CSV_PATH")
