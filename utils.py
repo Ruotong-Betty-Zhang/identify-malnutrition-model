@@ -81,7 +81,7 @@ def drop_columns(df):
     # drop iK4d: Dry mouth 
     # drop iNN2: Not in dictionary, and no data
     # drop iJ1(miss 63% of the data, 2190 data missing): Falls
-    additional_cols_to_drop = ["iK4d", "iNN2", "iJ1"]
+    additional_cols_to_drop = ["iK4d", "iNN2"]
     cols_to_drop.extend(additional_cols_to_drop)
     
     df = df.drop(columns=cols_to_drop)
@@ -165,8 +165,6 @@ def fill_missing_by_idno_and_mode(df, id_column='IDno'):
 
 # For every patient with the same IDno, calculate the change in each features compare to the last assessment divided by the day passed
 def calculate_feature_changes(df, exclude_columns=['IDno', 'Assessment_Date', 'Malnutrition', 'CAP_Nutrition'], include_columns=[
-    'iK1ab',
-    'iK1bb',
     "Scale_ADLHierarchy",
     "Scale_ADLLongForm",
     "Scale_ADLShortForm",
