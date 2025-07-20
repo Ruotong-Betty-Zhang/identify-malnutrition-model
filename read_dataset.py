@@ -66,5 +66,5 @@ mal_1.to_pickle(os.path.join(dataset_folder, 'MAL_1.pkl'))
 mal_2 = combine_malnutrition_labels(mal_1)
 mal_2.to_pickle(os.path.join(dataset_folder, 'MAL_2.pkl'))
 
-mal_long = calculate_feature_changes(mal_df)
+mal_long = calculate_feature_changes(mal_2)
 mal_long.to_pickle(os.path.join(dataset_folder, 'MAL_L.pkl'))
