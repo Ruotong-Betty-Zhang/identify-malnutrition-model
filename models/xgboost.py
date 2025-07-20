@@ -47,10 +47,11 @@ class XGBoostModelTrainer:
 
         # 参数搜索空间（可替换为更大空间）
         params = {
-            'max_depth': [5],
-            'learning_rate': [0.01],
-            'n_estimators': [50],
-            'subsample': [1],
+            'max_depth': [5, 7, 10],
+            'learning_rate': [0.01, 0.1],
+            'n_estimators': [50, 100, 200],
+            'subsample': [0.6, 0.8, 1],
+            'colsample_bytree': [0.6, 0.8, 1],
         }
 
         # 定义模型
