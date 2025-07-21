@@ -44,6 +44,7 @@ df = drop_columns(df)
 
 # Generate cap df
 cap_df = drop_cap_nutrition_rows(df)
+cap_df = cap_df.drop(columns=["Scale_BMI"])
 # cap_df = fill_missing_by_idno_and_mode(cap_df)
 cap_df = knn_impute_missing_values(cap_df)
 cap_1 = restore_integer_columns(cap_df, original_df=df)
