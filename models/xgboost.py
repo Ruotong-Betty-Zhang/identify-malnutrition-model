@@ -86,25 +86,35 @@ class XGBoostModelTrainer:
         model_path = os.path.join(target_subfolder, f'{dataset_name}_xgb_model.pkl')
         joblib.dump(self.model, model_path)
         print(f"Model saved to {model_path}")
-
-        # 保存前12个特征重要性图（自定义画法）
+        
+        # 保存特征重要性图
         importances = self.model.feature_importances_
-        indices = np.argsort(importances)[::-1]
+
+        # 将重要性归一化为百分比（总和为100）
+        importances_pct = importances / importances.sum() * 100
+
+        # 获取 top 12 特征的索引和数值
+        indices = np.argsort(importances_pct)[::-1]
         top_n = 12
         top_indices = indices[:top_n]
         top_features = X.columns[top_indices]
-        top_importances = importances[top_indices]
+        top_importances = importances_pct[top_indices]
 
+        # 画图
         plt.figure(figsize=(10, 6))
         plt.barh(range(top_n), top_importances[::-1], align='center')
         plt.yticks(range(top_n), top_features[::-1])
-        plt.xlabel("Feature Importance")
+        plt.xlabel("Feature Importance (%)")
         plt.title("Top 12 Most Important Features (XGBoost)")
         plt.tight_layout()
+
+        # 保存图像
         plot_path = os.path.join(target_subfolder, f'{dataset_name}_xgb_importance.png')
         plt.savefig(plot_path, dpi=300)
         plt.close()
+
         print(f"Top 12 feature importance plot saved to {plot_path}")
+
 
         # # 可选：用 XGBoost 内置画法再画一张
         # plt.figure(figsize=(12, 8))
