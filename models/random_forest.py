@@ -48,7 +48,11 @@ class RandomForestModelTrainer:
         params = {
             'n_estimators': [100, 200, 300],
             'ccp_alpha': np.linspace(0.0, 0.05, 5),
-            'max_depth': [3, 5, 10, None],
+            'max_depth': [3, 5, 10, 20, 30, None],
+            'min_samples_split': [2, 5, 10],
+            'min_samples_leaf': [1, 2, 4],
+            'max_features': ['auto', 'sqrt', 'log2'],
+            'class_weight': ['balanced', None]
         }
 
         # 网格搜索 + 交叉验证
@@ -78,22 +82,32 @@ class RandomForestModelTrainer:
         joblib.dump(self.model, model_path)
         print(f"Model saved to {model_path}")
 
-        # 绘制并保存前10个特征的重要性图（纵向显示）
-        feature_importances = self.model.feature_importances_
-        feature_names = X.columns
-        indices = np.argsort(feature_importances)[::-1][:10]  # Top 10
+        # 保存特征重要性图
+        importances = self.model.feature_importances_
 
-        plt.figure(figsize=(8, 6))
-        plt.title("Top 10 Feature Importances")
-        plt.barh(range(len(indices)), feature_importances[indices], align="center")
-        plt.yticks(range(len(indices)), feature_names[indices])
-        plt.gca().invert_yaxis()  # 最大的排最上
-        plt.xlabel("Importance Score")
+        # 将重要性归一化为百分比（总和为100）
+        importances_pct = importances / importances.sum() * 100
+
+        # 获取 top 12 特征的索引和数值
+        indices = np.argsort(importances_pct)[::-1]
+        top_n = 12
+        top_indices = indices[:top_n]
+        top_features = X.columns[top_indices]
+        top_importances = importances_pct[top_indices]
+
+        # 画图
+        plt.figure(figsize=(10, 6))
+        plt.barh(range(top_n), top_importances[::-1], align='center')
+        plt.yticks(range(top_n), top_features[::-1])
+        plt.xlabel("Feature Importance (%)")
+        plt.title("Top 12 Most Important Features (XGBoost)")
         plt.tight_layout()
 
-        importance_path = os.path.join(target_folder, 'rf_' + dataset_name + '_importance.png')
-        plt.savefig(importance_path)
+        # 保存图像
+        plot_path = os.path.join(target_folder, f'{dataset_name}_xgb_importance.png')
+        plt.savefig(plot_path, dpi=300)
         plt.close()
-        print(f"Top 10 feature importance plot saved to {importance_path}")
+
+        print(f"Top 12 feature importance plot saved to {plot_path}")
 
         return self.model
