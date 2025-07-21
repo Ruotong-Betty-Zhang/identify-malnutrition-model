@@ -18,16 +18,35 @@ rf_model.train(os.path.join(dataset_folder, 'MAL_1.pkl'), model_output)
 # Train the model on MAL_2 dataset
 rf_model.train(os.path.join(dataset_folder, 'MAL_2.pkl'), model_output)
 
+# Train the model on MAL_1 dataset
+rf_model.train(os.path.join(dataset_folder, 'CAP_1.pkl'), model_output)
+
+# Train the model on MAL_2 dataset
+rf_model.train(os.path.join(dataset_folder, 'CAP_2.pkl'), model_output)
+
 # Define the XGBoost model
 xgb_model = xgb.XGBoostModelTrainer(seed=42)
 
-# # Train the model on MAL_1 dataset
-# # Best parameters found: {'colsample_bytree': 0.6, 'learning_rate': 0.1, 'max_depth': 7, 'n_estimators': 200, 'subsample': 0.8}
-# xgb_model.train(os.path.join(dataset_folder, 'MAL_1.pkl'), model_output)
+# Train the model on MAL_1 dataset
+# Best parameters found: {'colsample_bytree': 0.6, 'learning_rate': 0.1, 'max_depth': 7, 'n_estimators': 200, 'subsample': 0.8}
+xgb_model.train(os.path.join(dataset_folder, 'MAL_1.pkl'), model_output, parameters={
+    'colsample_bytree': [0.6],
+    'learning_rate': [0.1],
+    'max_depth': [7],
+    'n_estimators': [200],
+    'subsample': [0.8]
+})
 
-# # Train the model on MAL_2 dataset
-# # Best parameters found: {'colsample_bytree': 1, 'learning_rate': 0.1, 'max_depth': 10, 'n_estimators': 200, 'subsample': 0.8}
-# xgb_model.train(os.path.join(dataset_folder, 'MAL_2.pkl'), model_output)
+# Train the model on MAL_2 dataset
+# Best parameters found: {'colsample_bytree': 1, 'learning_rate': 0.1, 'max_depth': 10, 'n_estimators': 200, 'subsample': 0.8}
+xgb_model.train(os.path.join(dataset_folder, 'MAL_2.pkl'), model_output, parameters={
+    'colsample_bytree': [1],
+    'learning_rate': [0.1],
+    'max_depth': [10],
+    'n_estimators': [200],
+    'subsample': [0.8]
+})
 
+xgb_model.train(os.path.join(dataset_folder, 'CAP_1.pkl'), model_output)
 
-
+xgb_model.train(os.path.join(dataset_folder, 'CAP_2.pkl'), model_output)

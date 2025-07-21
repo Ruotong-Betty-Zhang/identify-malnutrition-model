@@ -12,7 +12,7 @@ class RandomForestModelTrainer:
         self.seed = seed
         self.model = None
 
-    def train(self, dataset_path: str, output_folder: str):
+    def train(self, dataset_path: str, output_folder: str, parameters=None):
         # 确保输出路径存在
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
@@ -55,6 +55,9 @@ class RandomForestModelTrainer:
             'class_weight': ['balanced', None]
         }
 
+        if parameters:
+            params = parameters
+
         # 网格搜索 + 交叉验证
         grid = GridSearchCV(RandomForestClassifier(random_state=self.seed), params, cv=5, n_jobs=-1)
         grid.fit(X_train, y_train)
@@ -73,12 +76,12 @@ class RandomForestModelTrainer:
 
         # 创建输出文件夹
         dataset_name = os.path.basename(dataset_path).split('.')[0]
-        target_folder = os.path.join(output_folder, 'rf_' + dataset_name)
-        if not os.path.exists(target_folder):
-            os.makedirs(target_folder)
+        target_subfolder = os.path.join(output_folder, 'rf_' + dataset_name)
+        if not os.path.exists(target_subfolder):
+            os.makedirs(target_subfolder)
         
         # 保存模型
-        model_path = os.path.join(target_folder, 'rf_' + dataset_name + '_model.pkl')
+        model_path = os.path.join(target_subfolder, 'rf_' + dataset_name + '_model.pkl')
         joblib.dump(self.model, model_path)
         print(f"Model saved to {model_path}")
 
@@ -97,14 +100,19 @@ class RandomForestModelTrainer:
 
         # 画图
         plt.figure(figsize=(10, 6))
-        plt.barh(range(top_n), top_importances[::-1], align='center')
+        bars = plt.barh(range(top_n), top_importances[::-1], align='center')
         plt.yticks(range(top_n), top_features[::-1])
         plt.xlabel("Feature Importance (%)")
         plt.title("Top 12 Most Important Features (XGBoost)")
         plt.tight_layout()
 
+        # 在每个条形图旁边加上数值标签
+        for i, (value, bar) in enumerate(zip(top_importances[::-1], bars)):
+            plt.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height() / 2,
+                    f'{value:.2f}%', va='center')
+
         # 保存图像
-        plot_path = os.path.join(target_folder, f'{dataset_name}_xgb_importance.png')
+        plot_path = os.path.join(target_subfolder, f'{dataset_name}_xgb_importance.png')
         plt.savefig(plot_path, dpi=300)
         plt.close()
 
