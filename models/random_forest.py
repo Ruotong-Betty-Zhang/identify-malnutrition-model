@@ -108,7 +108,7 @@ class RandomForestModelTrainer:
 
         # 在每个条形图旁边加上数值标签
         for i, (value, bar) in enumerate(zip(top_importances[::-1], bars)):
-            plt.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height() / 2,
+            plt.text(0.1, bar.get_y() + bar.get_height() / 2,
                     f'{value:.2f}%', va='center')
 
         # 保存图像
