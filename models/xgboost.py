@@ -14,7 +14,7 @@ class XGBoostModelTrainer:
         self.device = device
         self.model = None
 
-    def train(self, dataset_path: str, output_folder: str):
+    def train(self, dataset_path: str, output_folder: str, parameters=None):
         # 确保输出文件夹存在
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
@@ -53,6 +53,9 @@ class XGBoostModelTrainer:
             'subsample': [0.6, 0.8, 1],
             'colsample_bytree': [0.6, 0.8, 1],
         }
+
+        if parameters:
+            params = parameters
 
         # 定义模型
         xgb = XGBClassifier(
@@ -102,11 +105,16 @@ class XGBoostModelTrainer:
 
         # 画图
         plt.figure(figsize=(10, 6))
-        plt.barh(range(top_n), top_importances[::-1], align='center')
+        bars = plt.barh(range(top_n), top_importances[::-1], align='center')
         plt.yticks(range(top_n), top_features[::-1])
         plt.xlabel("Feature Importance (%)")
         plt.title("Top 12 Most Important Features (XGBoost)")
         plt.tight_layout()
+
+        # 在每个条形图旁边加上数值标签
+        for i, (value, bar) in enumerate(zip(top_importances[::-1], bars)):
+            plt.text(0.1, bar.get_y() + bar.get_height() / 2,
+                    f'{value:.2f}%', va='center')
 
         # 保存图像
         plot_path = os.path.join(target_subfolder, f'{dataset_name}_xgb_importance.png')
