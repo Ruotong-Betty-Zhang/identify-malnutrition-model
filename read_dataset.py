@@ -36,7 +36,7 @@ extra_info_df = dfs["Staying Upright demo2"]
 
 # Preprocess the DataFrames
 df = calculate_age(basic_info_df, extra_info_df)
-df = generate_gender_column_and_carelevel(basic_info_df, extra_info_df)
+df = generate_gender_column_and_carelevel(df, extra_info_df)
 # # Check for missing values
 # columns_to_check = ['iJ1g', 'iJ1h', 'iJ1i', 'iJ12', 'iK1ab', 'iK1bb']
 # check_missing_values(columns_to_check, df)
@@ -68,3 +68,13 @@ mal_2.to_pickle(os.path.join(dataset_folder, 'MAL_2.pkl'))
 
 mal_long = calculate_feature_changes(mal_2)
 mal_long.to_pickle(os.path.join(dataset_folder, 'MAL_L.pkl'))
+
+# # 生成df的年龄分布图
+# plt.figure(figsize=(10, 6))
+# df['Age'].hist(bins=30, edgecolor='black')
+# plt.title('Age Distribution')
+# plt.xlabel('Age')
+# plt.ylabel('Frequency')
+# plt.grid(False)
+# plt.savefig(os.path.join(dataset_folder, 'age_distribution.png'))
+# plt.close()
