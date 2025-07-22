@@ -41,13 +41,15 @@ df = generate_gender_column_and_carelevel(df, extra_info_df)
 # columns_to_check = ['iJ1g', 'iJ1h', 'iJ1i', 'iJ12', 'iK1ab', 'iK1bb']
 # check_missing_values(columns_to_check, df)
 df = drop_columns(df)
+df = drop_cap_nutrition_rows(df)
+temp_df = df.copy()
+df = knn_impute_missing_values(df)
+df = restore_integer_columns(df, original_df=temp_df)
 
 # Generate cap df
-cap_df = drop_cap_nutrition_rows(df)
-cap_df = cap_df.drop(columns=["Scale_BMI"])
+cap_1 = df.copy()
+cap_1 = cap_1.drop(columns=["Scale_BMI"])
 # cap_df = fill_missing_by_idno_and_mode(cap_df)
-cap_df = knn_impute_missing_values(cap_df)
-cap_1 = restore_integer_columns(cap_df, original_df=df)
 cap_1.to_pickle(os.path.join(dataset_folder, 'CAP_1.pkl'))
 
 cap_2 = calculate_malnutrition(cap_1)
@@ -57,11 +59,10 @@ cap_long = calculate_feature_changes(cap_1)
 cap_long.to_pickle(os.path.join(dataset_folder, 'CAP_L.pkl'))
 
 # Generate mal df
-mal_df = calculate_malnutrition(df)
-mal_df = df.drop(columns=["iK2a", "iK2g", "iG3", "iE2a", "iE2b", "iE2c", "iI1c", "iI1d", "CAP_Nutrition"])
+mal_1 = calculate_malnutrition(df)
+mal_1 = mal_1.drop(columns=["iK2a", "iK2g", "iG3", "iE2a", "iE2b", "iE2c", "iI1c", "iI1d", "CAP_Nutrition"])
 # mal_df = fill_missing_by_idno_and_mode(mal_df)
-mal_df = knn_impute_missing_values(mal_df)
-mal_1 = restore_integer_columns(mal_df,original_df=df)
+
 mal_1.to_pickle(os.path.join(dataset_folder, 'MAL_1.pkl'))
 
 mal_2 = combine_malnutrition_labels(mal_1)
