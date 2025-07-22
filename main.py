@@ -89,6 +89,13 @@ xgb_model.train(os.path.join(dataset_folder, 'MAL_2.pkl'), model_output, paramet
     'subsample': [1]
 })
 
+# Train the model on MAL_L dataset
+
+
+print("Training XGBoost model on MAL_L dataset")
+xgb_model.train(os.path.join(dataset_folder, 'MAL_L.pkl'), model_output)
+
+# Train the model on CAP_1 dataset
 # Best parameters found: {'colsample_bytree': 1, 'learning_rate': 0.1, 'max_depth': 10, 'n_estimators': 200, 'subsample': 0.6}
 # Accuracy: 0.8088, macro recall: 0.62, weight recall: 0.81
 xgb_model.train(os.path.join(dataset_folder, 'CAP_1.pkl'), model_output, parameters={
@@ -99,6 +106,7 @@ xgb_model.train(os.path.join(dataset_folder, 'CAP_1.pkl'), model_output, paramet
     'subsample': [0.6]
 })
 
+# Train the model on CAP_2 dataset
 # Best parameters found: {'colsample_bytree': 1, 'learning_rate': 0.1, 'max_depth': 10, 'n_estimators': 200, 'subsample': 0.8}
 # Accuracy: 0.8059, macro recall: 0.62, weight recall: 0.81
 xgb_model.train(os.path.join(dataset_folder, 'CAP_2.pkl'), model_output, parameters={
@@ -108,3 +116,9 @@ xgb_model.train(os.path.join(dataset_folder, 'CAP_2.pkl'), model_output, paramet
     'n_estimators': [200],
     'subsample': [0.8]
 })
+
+# Train the model on CAP_L dataset
+print("Training XGBoost model on CAP_L dataset")
+
+
+xgb_model.train(os.path.join(dataset_folder, 'CAP_L.pkl'), model_output)
