@@ -47,8 +47,11 @@ def calculate_age(basic_info, extra_info):
     # Drop helper columns if needed
     result_df = merged_df.drop(columns=["IDNo", "Q3DoB", "Q4Age_BL", "Date1"])
 
+    # Drop all assessments where Age is NaN
+    result_df = result_df.dropna(subset=["Age"])
+
     # Optional: Preview
-    print(result_df[["IDno", "Assessment_Date", "Age"]].head(10))
+    # print(result_df[["IDno", "Assessment_Date", "Age"]].head(10))
 
     return result_df
 # def generate_gender_column_and_carelevel(basic_info, extra_info):
@@ -96,10 +99,11 @@ def generate_gender_column_and_carelevel(basic_info: pd.DataFrame, extra_info: p
 
 def drop_columns(df):
     """Return a DataFrame with unnecessary columns dropped."""
+    result_df = df.copy(deep=True)
     # Drop all cols after iJ1g
     columns_to_keep = ['iJ1g', 'iJ1h', 'iJ1i', 'iJ12', 'iJ1', 'Age', 'Gender', 'CareLevel']
-    start_index = df.columns.get_loc('iJ1g')
-    cols_from_start = df.columns[start_index:]
+    start_index = result_df.columns.get_loc('iJ1g')
+    cols_from_start = result_df.columns[start_index:]
     cols_to_drop = [col for col in cols_from_start if col not in columns_to_keep]
 
     # drop iK4d: Dry mouth 
@@ -108,8 +112,8 @@ def drop_columns(df):
     additional_cols_to_drop = ["iK4d", "iNN2", "iJ1"]
     cols_to_drop.extend(additional_cols_to_drop)
     
-    df = df.drop(columns=cols_to_drop)
-    return df
+    result_df = result_df.drop(columns=cols_to_drop)
+    return result_df
 
 def average_fill_empty(df):
     """Fill NaN values in the DataFrame with the mean of each column."""
@@ -120,8 +124,9 @@ def average_fill_empty(df):
 
 def calculate_malnutrition(df):
     """Calculate malnutrition status based on specific columns and return a DataFrame with the new column."""
-    df["Malnutrition"] = df.apply(get_malnutrition_status, axis=1)
-    return df
+    result_df = df.copy(deep=True)
+    result_df["Malnutrition"] = result_df.apply(get_malnutrition_status, axis=1)
+    return result_df
 
 def get_malnutrition_status(row):
     if row["iK2a"] is None or row["iK2g"] is None or row["iG3"] is None or row["iE2a"] is None or row["iE2b"] is None or row["iE2c"] is None or row["iI1c"] is None:
@@ -149,11 +154,6 @@ def get_malnutrition_status(row):
     if row["iI1d"] in [1, 2, 3] and not dementia:
         score += 1
     return score
-
-def drop_cap_nutrition_rows(df):
-    """Drop rows where CAP_Nutrition is NaN and return the DataFrame."""
-    return df.dropna(subset=["CAP_Nutrition"])
-
 
 def check_missing_values(columns_to_check, df):
     """Check for missing values in the specified columns of the DataFrame."""
@@ -216,9 +216,15 @@ def calculate_feature_changes(df, exclude_columns=['IDno', 'Assessment_Date', 'M
     changed_df['Assessment_Date'] = pd.to_datetime(changed_df['Assessment_Date'])
 
     # Create new columns for the change in each feature
-    for column in changed_df.columns:
-        if column not in exclude_columns and '_change' not in column:
-            changed_df[f"{column}_change"] = np.nan  # Initialize with NaN
+    # 创建空的 DataFrame 来存储 change 列
+    change_cols = [
+        f"{col}_change" for col in changed_df.columns
+        if col not in exclude_columns and '_change' not in col
+    ]
+    change_df = pd.DataFrame(np.nan, index=changed_df.index, columns=change_cols)
+
+    # 一次性拼接，避免碎片化
+    changed_df = pd.concat([changed_df, change_df], axis=1)
 
     # Go through each patient
     for patient_id in changed_df['IDno'].unique():

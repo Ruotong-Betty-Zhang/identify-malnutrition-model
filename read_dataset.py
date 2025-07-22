@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
 import locale
-from utils import calculate_age, drop_columns, combine_malnutrition_labels, calculate_malnutrition, drop_cap_nutrition_rows, generate_gender_column_and_carelevel, check_missing_values, fill_missing_by_idno_and_mode, calculate_feature_changes, knn_impute_missing_values,restore_integer_columns
+from utils import calculate_age, drop_columns, combine_malnutrition_labels, calculate_malnutrition, generate_gender_column_and_carelevel, check_missing_values, fill_missing_by_idno_and_mode, calculate_feature_changes, knn_impute_missing_values,restore_integer_columns
 from dotenv import load_dotenv
 import os
 
@@ -41,13 +41,13 @@ df = generate_gender_column_and_carelevel(df, extra_info_df)
 # columns_to_check = ['iJ1g', 'iJ1h', 'iJ1i', 'iJ12', 'iK1ab', 'iK1bb']
 # check_missing_values(columns_to_check, df)
 df = drop_columns(df)
-df = drop_cap_nutrition_rows(df)
-temp_df = df.copy()
+df = df.dropna(subset=["CAP_Nutrition"])
+temp_df = df.copy(deep=True)
 df = knn_impute_missing_values(df)
 df = restore_integer_columns(df, original_df=temp_df)
 
 # Generate cap df
-cap_1 = df.copy()
+cap_1 = df.copy(deep=True)
 cap_1 = cap_1.drop(columns=["Scale_BMI"])
 # cap_df = fill_missing_by_idno_and_mode(cap_df)
 cap_1.to_pickle(os.path.join(dataset_folder, 'CAP_1.pkl'))
