@@ -98,7 +98,7 @@ class XGBoostModelTrainer:
 
         # 获取 top 12 特征的索引和数值
         indices = np.argsort(importances_pct)[::-1]
-        top_n = 12
+        top_n = 8
         top_indices = indices[:top_n]
         top_features = X.columns[top_indices]
         top_importances = importances_pct[top_indices]
@@ -108,7 +108,7 @@ class XGBoostModelTrainer:
         bars = plt.barh(range(top_n), top_importances[::-1], align='center')
         plt.yticks(range(top_n), top_features[::-1])
         plt.xlabel("Feature Importance (%)")
-        plt.title("Top 12 Most Important Features (XGBoost)")
+        plt.title("Top 8 Most Important Features (xgb_" + dataset_name + ")")
         plt.tight_layout()
 
         # 在每个条形图旁边加上数值标签
@@ -121,7 +121,7 @@ class XGBoostModelTrainer:
         plt.savefig(plot_path, dpi=300)
         plt.close()
 
-        print(f"Top 12 feature importance plot saved to {plot_path}")
+        print(f"Top 8 feature importance plot saved to {plot_path}")
 
 
         # # 可选：用 XGBoost 内置画法再画一张
