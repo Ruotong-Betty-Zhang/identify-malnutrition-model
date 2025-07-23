@@ -6,13 +6,15 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 from xgboost import XGBClassifier, plot_importance
-
+import json
+from sklearn.metrics import f1_score, recall_score, precision_score
 
 class XGBoostModelTrainer:
     def __init__(self, seed=42, device='cuda'):
         self.seed = seed
         self.device = device
         self.model = None
+        self.best_params = None
 
     def train(self, dataset_path: str, output_folder: str, parameters=None):
         # 确保输出文件夹存在
@@ -66,11 +68,12 @@ class XGBoostModelTrainer:
         )
 
         # 网格搜索
-        grid = GridSearchCV(xgb, params, cv=5, verbose=1, n_jobs=-1)
+        grid = GridSearchCV(xgb, params, cv=5, verbose=1, n_jobs=1)
         grid.fit(X_train, y_train)
 
         print("Best parameters found:", grid.best_params_)
         self.model = grid.best_estimator_
+        self.best_params = grid.best_params_
 
         # 测试集预测与评估
         y_test_pred = self.model.predict(X_test)
@@ -78,6 +81,21 @@ class XGBoostModelTrainer:
         print("Accuracy:", accuracy_score(y_test, y_test_pred))
         print("Confusion Matrix:\n", confusion_matrix(y_test, y_test_pred))
         print("Classification Report:\n", classification_report(y_test, y_test_pred))
+
+        
+
+        # 计算多分类指标（macro 是对每类分别计算再平均，不受类别不平衡影响）
+        accuracy = accuracy_score(y_test, y_test_pred)
+        f1_macro = f1_score(y_test, y_test_pred, average='macro')
+        recall_macro = recall_score(y_test, y_test_pred, average='macro')  # Sensitivity
+        precision_macro = precision_score(y_test, y_test_pred, average='macro')
+
+        print("\n🔍 Multi-class Evaluation Metrics (macro average):")
+        print(f"Accuracy       : {accuracy:.4f}")
+        print(f"Sensitivity    : {recall_macro:.4f}")      # i.e. macro recall
+        print(f"F1-score       : {f1_macro:.4f}")
+        print(f"Precision      : {precision_macro:.4f}")
+
 
         # 子文件夹命名
         dataset_name = os.path.basename(dataset_path).split('.')[0]
@@ -89,6 +107,10 @@ class XGBoostModelTrainer:
         model_path = os.path.join(target_subfolder, f'{dataset_name}_xgb_model.pkl')
         joblib.dump(self.model, model_path)
         print(f"Model saved to {model_path}")
+
+        # 保存最佳参数
+        self.save_best_params(target_subfolder, dataset_name)
+
         
         # 保存特征重要性图
         importances = self.model.feature_importances_
@@ -134,3 +156,12 @@ class XGBoostModelTrainer:
         # print(f"XGBoost built-in feature importance plot saved to {builtin_plot_path}")
 
         return self.model
+
+    def save_best_params(self, output_folder, dataset_name):
+        if self.best_params is not None:
+            params_path = os.path.join(output_folder, f'{dataset_name}_xgb_best_params.json')
+            with open(params_path, 'w') as f:
+                json.dump(self.best_params, f, indent=4)
+            print(f"Best parameters saved to {params_path}")
+        else:
+            print("No best parameters to save.")
