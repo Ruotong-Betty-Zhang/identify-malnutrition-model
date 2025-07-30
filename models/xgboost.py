@@ -120,17 +120,21 @@ class XGBoostModelTrainer:
 
         # 获取 top 12 特征的索引和数值
         indices = np.argsort(importances_pct)[::-1]
-        top_n = 8
+        top_n = 12
         top_indices = indices[:top_n]
         top_features = X.columns[top_indices]
         top_importances = importances_pct[top_indices]
+        # Print the top 12 features in one line
+        # top_features_str = ', '.join([f"{feat} ({imp:.2f}%)" for feat, imp in zip(top_features, top_importances)])
+        top_features_str = ', '.join([f"{feat}" for feat, imp in zip(top_features, top_importances)])
+        print(f"Top 12 features: {top_features_str}")
 
         # 画图
         plt.figure(figsize=(10, 6))
         bars = plt.barh(range(top_n), top_importances[::-1], align='center')
         plt.yticks(range(top_n), top_features[::-1])
         plt.xlabel("Feature Importance (%)")
-        plt.title("Top 8 Most Important Features (xgb_" + dataset_name + ")")
+        plt.title("Top " + str(top_n) + " Most Important Features (xgb_" + dataset_name + ")")
         plt.tight_layout()
 
         # 在每个条形图旁边加上数值标签
