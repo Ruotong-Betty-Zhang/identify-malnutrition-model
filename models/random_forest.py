@@ -6,6 +6,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 import joblib
 import matplotlib.pyplot as plt
+from sklearn.metrics import f1_score, recall_score, precision_score
 
 class RandomForestModelTrainer:
     def __init__(self, seed=42):
@@ -74,6 +75,17 @@ class RandomForestModelTrainer:
         print("Confusion Matrix:\n", confusion_matrix(y_test, y_test_pred))
         print("Classification Report:\n", classification_report(y_test, y_test_pred))
 
+        accuracy = accuracy_score(y_test, y_test_pred)
+        f1_macro = f1_score(y_test, y_test_pred, average='macro')
+        recall_macro = recall_score(y_test, y_test_pred, average='macro')  # Sensitivity
+        precision_macro = precision_score(y_test, y_test_pred, average='macro')
+
+        print("\n🔍 Multi-class Evaluation Metrics (macro average):")
+        print(f"Accuracy       : {accuracy:.4f}")
+        print(f"Sensitivity    : {recall_macro:.4f}")      # i.e. macro recall
+        print(f"F1-score       : {f1_macro:.4f}")
+        print(f"Precision      : {precision_macro:.4f}")
+
         # 创建输出文件夹
         dataset_name = os.path.basename(dataset_path).split('.')[0]
         target_subfolder = os.path.join(output_folder, 'rf_' + dataset_name)
@@ -93,7 +105,7 @@ class RandomForestModelTrainer:
 
         # 获取 top 8 特征的索引和数值
         indices = np.argsort(importances_pct)[::-1]
-        top_n = 8
+        top_n = 12
         top_indices = indices[:top_n]
         top_features = X.columns[top_indices]
         top_importances = importances_pct[top_indices]
@@ -103,13 +115,13 @@ class RandomForestModelTrainer:
         bars = plt.barh(range(top_n), top_importances[::-1], align='center')
         plt.yticks(range(top_n), top_features[::-1])
         plt.xlabel("Feature Importance (%)")
-        plt.title("Top 8 Most Important Features (rf_" + dataset_name + ")")
+        plt.title("Top 12 Most Important Features (rf_" + dataset_name + ")")
         plt.tight_layout()
 
-        # 在每个条形图旁边加上数值标签
+        # 在每个条形图旁边加上白色数值标签
         for i, (value, bar) in enumerate(zip(top_importances[::-1], bars)):
             plt.text(0.1, bar.get_y() + bar.get_height() / 2,
-                    f'{value:.2f}%', va='center')
+                    f'{value:.2f}%', va='center', color='white')
 
         # 保存图像
         plot_path = os.path.join(target_subfolder, f'{dataset_name}_rf_importance.png')
@@ -117,5 +129,11 @@ class RandomForestModelTrainer:
         plt.close()
 
         print(f"Top 12 feature importance plot saved to {plot_path}")
+
+        # Print the top 12 features in one line
+        # top_features_str = ', '.join([f"{feat} ({imp:.2f}%)" for feat, imp in zip(top_features, top_importances)])
+        top_features_str = ', '.join([f"{feat}" for feat, imp in zip(top_features, top_importances)])
+        print(f"Top 12 features: {top_features_str}")
+
 
         return self.model

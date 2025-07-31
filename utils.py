@@ -259,6 +259,9 @@ def calculate_feature_changes(df, exclude_columns=['IDno', 'Assessment_Date', 'M
 
         # Remove the first assessment for each patient, as it has no previous assessment to compare to
         changed_df = changed_df[changed_df['Assessment_Date'] != patient_data.iloc[0]['Assessment_Date']] 
+
+        # Remove the empty columns that were created for change
+        changed_df = changed_df.drop(columns=[col for col in changed_df.columns if '_change' in col and changed_df[col].isnull().all()])
     return changed_df
 
 def knn_impute_missing_values(df, exclude_cols=['IDno', 'Assessment_Date'], n_neighbors=5):
