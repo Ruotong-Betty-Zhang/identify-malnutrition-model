@@ -13,56 +13,77 @@ model_output = os.getenv("MODEL_OUTPUT")
 rf_model = rf.RandomForestModelTrainer(seed=42)
 
 # # Train the model on MAL_1 dataset
-# # Best parameters found:  {'ccp_alpha': np.float64(0.0), 'class_weight': 'balanced', 'max_depth': 30, 'max_features': 'log2', 'min_samples_leaf': 1, 'min_samples_split': 2, 'n_estimators': 300}
-# # Accuracy: 0.8456, macro recall: 0.56, weight recall: 0.85
-# rf_model.train(os.path.join(dataset_folder, 'MAL_1.pkl'), model_output, parameters={
-#     'ccp_alpha': [0.0],
-#     'class_weight': ['balanced'],
-#     'max_depth': [30],
-#     'max_features': ['log2'],
-#     'min_samples_leaf': [1],
-#     'min_samples_split': [2],
-#     'n_estimators': [300]
-# })
+# Train the model on MAL_1 dataset
+# Best parameters found:  {'ccp_alpha': np.float64(0.0), 'class_weight': None, 'max_depth': None, 'max_features': 'log2', 'min_samples_leaf': 1, 'min_samples_split': 2, 'n_estimators': 300}
+rf_model.train(os.path.join(dataset_folder, 'MAL_1.pkl'), model_output, parameters={
+    'ccp_alpha': [0.0],
+    'class_weight': [None],
+    'max_depth': [None],
+    'max_features': ['log2'],
+    'min_samples_leaf': [1],
+    'min_samples_split': [2],
+    'n_estimators': [300]
+})
 
-# # Train the model on MAL_2 dataset
-# # Best parameters found:  {'ccp_alpha': np.float64(0.0), 'class_weight': None, 'max_depth': 20, 'max_features': 'log2', 'min_samples_leaf': 1, 'min_samples_split': 2, 'n_estimators': 200}
-# # Accuracy: 0.9726, macro recall: 0.68, weight recall: 0.97
-# rf_model.train(os.path.join(dataset_folder, 'MAL_2.pkl'), model_output, parameters={
-#     'ccp_alpha': [0.0],
-#     'class_weight': [None],
-#     'max_depth': [20],
-#     'max_features': ['log2'],
-#     'min_samples_leaf': [1],
-#     'min_samples_split': [2],
-#     'n_estimators': [200]
-# })
+# Train the model on MAL_2 dataset
+# Best parameters found:  {'ccp_alpha': np.float64(0.0), 'class_weight': 'balanced', 'max_depth': 30, 'max_features': 'sqrt', 'min_samples_leaf': 2, 'min_samples_split': 2, 'n_estimators': 200}
+rf_model.train(os.path.join(dataset_folder, 'MAL_2.pkl'), model_output, parameters={
+    'ccp_alpha': [0.0],
+    'class_weight': ['balanced'],
+    'max_depth': [30],
+    'max_features': ['sqrt'],
+    'min_samples_leaf': [2],
+    'min_samples_split': [2],
+    'n_estimators': [200]
+})
 
-# # Train the model on CAP_1 dataset
-# # Best parameters found:  {'ccp_alpha': np.float64(0.0), 'class_weight': 'balanced', 'max_depth': 10, 'max_features': 'sqrt', 'min_samples_leaf': 1, 'min_samples_split': 10, 'n_estimators': 300}
-# # Accuracy: 0.8074, macro recall: 0.65, weight recall: 0.80
-# rf_model.train(os.path.join(dataset_folder, 'CAP_1.pkl'), model_output, parameters={
-#     'ccp_alpha': [0.0],
-#     'class_weight': ['balanced'],
-#     'max_depth': [10],
-#     'max_features': ['sqrt'],
-#     'min_samples_leaf': [1],
-#     'min_samples_split': [10],
-#     'n_estimators': [300]
-# })
+# Train the model on CAP_1 dataset
+# Best parameters found:  {'ccp_alpha': np.float64(0.0), 'class_weight': None, 'max_depth': 30, 'max_features': 'sqrt', 'min_samples_leaf': 1, 'min_samples_split': 2, 'n_estimators': 100}
+rf_model.train(os.path.join(dataset_folder, 'CAP_1.pkl'), model_output, parameters={
+    'ccp_alpha': [0.0],
+    'class_weight': [None],
+    'max_depth': [30],
+    'max_features': ['sqrt'],
+    'min_samples_leaf': [1],
+    'min_samples_split': [2],
+    'n_estimators': [100]
+})
 
-# # Train the model on CAP_2 dataset
-# # Best parameters found:  {'ccp_alpha': np.float64(0.0), 'class_weight': 'balanced', 'max_depth': 30, 'max_features': 'sqrt', 'min_samples_leaf': 4, 'min_samples_split': 2, 'n_estimators': 200}
-# # Accuracy: 0.8, macro recall: 0.62, weight recall: 0.80
-# rf_model.train(os.path.join(dataset_folder, 'CAP_2.pkl'), model_output, parameters={
-#     'ccp_alpha': [0.0],
-#     'class_weight': ['balanced'],
-#     'max_depth': [30],
-#     'max_features': ['sqrt'],
-#     'min_samples_leaf': [4],
-#     'min_samples_split': [2],
-#     'n_estimators': [200]
-# })
+# Train the model on CAP_2 dataset
+# Best parameters found:  {'ccp_alpha': np.float64(0.0), 'class_weight': 'balanced', 'max_depth': 30, 'max_features': 'sqrt', 'min_samples_leaf': 2, 'min_samples_split': 10, 'n_estimators': 100}
+rf_model.train(os.path.join(dataset_folder, 'CAP_2.pkl'), model_output, parameters={
+    'ccp_alpha': [0.0],
+    'class_weight': ['balanced'],
+    'max_depth': [30],
+    'max_features': ['sqrt'],
+    'min_samples_leaf': [2],
+    'min_samples_split': [10],
+    'n_estimators': [100]
+})
+
+# Train the model on MAL_L dataset
+# Best parameters found:  {'ccp_alpha': np.float64(0.0), 'class_weight': 'balanced', 'max_depth': 10, 'max_features': 'sqrt', 'min_samples_leaf': 1, 'min_samples_split': 2, 'n_estimators': 100}
+rf_model.train(os.path.join(dataset_folder, 'MAL_L.pkl'), model_output, parameters={
+    'ccp_alpha': [0.0],
+    'class_weight': ['balanced'],
+    'max_depth': [10],
+    'max_features': ['sqrt'],
+    'min_samples_leaf': [1],
+    'min_samples_split': [2],
+    'n_estimators': [100]
+})
+
+# Train the model on CAP_L dataset
+# Best parameters found:  {'ccp_alpha': np.float64(0.0), 'class_weight': None, 'max_depth': 30, 'max_features': 'sqrt', 'min_samples_leaf': 1, 'min_samples_split': 2, 'n_estimators': 100}
+rf_model.train(os.path.join(dataset_folder, 'CAP_L.pkl'), model_output, parameters={
+    'ccp_alpha': [0.0],
+    'class_weight': [None],
+    'max_depth': [30],
+    'max_features': ['sqrt'],
+    'min_samples_leaf': [1],
+    'min_samples_split': [2],
+    'n_estimators': [100]
+})
 
 # Define the XGBoost model
 xgb_model = xgb.XGBoostModelTrainer(seed=42)
