@@ -395,12 +395,12 @@ if __name__ == '__main__':
     evaluate_model(model, test_loader, device, num_classes=num_classes)
 
     # Plot top-10 permutation importance
-    # importances = [permutation_feature_importance(model, MalnutritionDataset(test_X, test_y), i, device) for i in range(input_size)]
-    # sorted_idx = np.argsort(importances)[::-1]
-    # plt.barh([feature_cols[i] for i in sorted_idx[:10]], [importances[i] for i in sorted_idx[:10]])
-    # plt.gca().invert_yaxis()
-    # plt.title("Top 10 Permutation Importances")
-    # plt.xlabel("Accuracy Drop")
-    # plt.tight_layout()
-    # plt.show()
+    importances = [permutation_feature_importance(model, MalnutritionDataset(test_X, test_y), i, device) for i in range(input_size)]
+    sorted_idx = np.argsort(importances)[::-1]
+    plt.barh([feature_cols[i] for i in sorted_idx[:10]], [importances[i] for i in sorted_idx[:10]])
+    plt.gca().invert_yaxis()
+    plt.title("Top 10 Permutation Importances")
+    plt.xlabel("Accuracy Drop")
+    plt.tight_layout()
+    plt.show()
 
