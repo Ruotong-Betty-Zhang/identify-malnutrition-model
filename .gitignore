@@ -80,5 +80,9 @@ MANIFEST
 # ================================
 *.DS_Store
 
+OLD/datasets
+OLD/outputs
+input
 datasets
+images
 outputs

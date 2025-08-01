@@ -11,8 +11,10 @@ from copy import deepcopy
 import random
 from sklearn.utils.class_weight import compute_class_weight
 import numpy as np
-from collections import defaultdict
-from collections import OrderedDict
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+from sklearn.utils.class_weight import compute_class_weight
+from sklearn.metrics import roc_auc_score
 
 def set_seed(seed=42):
     torch.manual_seed(seed)
@@ -22,28 +24,35 @@ def set_seed(seed=42):
         torch.cuda.manual_seed(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-    torch.use_deterministic_algorithms(True, warn_only=True)
 
-
-
-def prepare_sequence_data(df, id_col='IDno', time_col='Assessment_Date', target_col='CAP_Nutrition'):
-    # df = df[df[target_col].isin([0, 1, 2])]
-    # df = df.dropna(subset=[target_col])
-    # df[target_col] = df[target_col].astype(int)
-    df['Assessment_Date'] = pd.to_datetime(df['Assessment_Date'], format="%d%b%Y")
-    feature_cols = [col for col in df.columns if col not in [id_col, time_col, target_col, 'Scale_BMI']]
+def prepare_sequence_data(df, id_col='IDno', time_col='Assessment_Date', target_col='Malnutrition'):
+    df[time_col] = pd.to_datetime(df[time_col], format="%d%b%Y")
+    
+    base_feature_cols = [col for col in df.columns if col not in [id_col, time_col, target_col]]
     print("The original df shape is:", df.shape)
 
-    # for col in feature_cols:
-    #     if df[col].dtype == 'object':
-    #         df[col] = LabelEncoder().fit_transform(df[col].astype(str))
+    df_features = df[base_feature_cols].copy()
+    scaler = StandardScaler()
+    df[base_feature_cols] = scaler.fit_transform(df_features)
 
     X_seqs, y_seqs, lengths, id_list = [], [], [], []
 
     for pid, group in df.groupby(id_col):
-        group_sorted = group.sort_values(by=time_col)
-        X = torch.tensor(group_sorted[feature_cols].values, dtype=torch.float32)
+        group_sorted = group.sort_values(by=time_col).copy()
+
+        # calculate time difference in days
+        group_sorted['Time_Delta'] = group_sorted[time_col].diff().dt.days.fillna(0)
+        # Normalize time delta
+        group_sorted['Time_Delta'] = group_sorted['Time_Delta'] / 180.0
+
+
+        # ensure the first entry has a time delta of 0
+        feature_data = group_sorted[base_feature_cols].copy()
+        feature_data['Time_Delta'] = group_sorted['Time_Delta']
+
+        X = torch.tensor(feature_data.values, dtype=torch.float32)
         y = torch.tensor(group_sorted[target_col].values[-1], dtype=torch.long)
+
         X_seqs.append(X)
         y_seqs.append(y)
         lengths.append(X.shape[0])
@@ -52,8 +61,9 @@ def prepare_sequence_data(df, id_col='IDno', time_col='Assessment_Date', target_
     return X_seqs, y_seqs, lengths, id_list
 
 
+
 def split_sequence_dataset_by_id(X_seqs, y_seqs, lengths, id_list, test_size=0.2, random_state=42):
-    unique_ids = list(OrderedDict.fromkeys(id_list))
+    unique_ids = list(set(id_list))
     
     id_to_label = {}
     for i, pid in enumerate(id_list):
@@ -130,19 +140,71 @@ def collate_fn(batch):
     return padded_seqs, lengths, labels
 
 
-class LSTMModel(nn.Module):
-    def __init__(self, input_size, hidden_size=32, num_classes=3):
-        super(LSTMModel, self).__init__()
-        self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True, bidirectional=True)
+class TLSTMModel(nn.Module):
+    def __init__(self, input_size, hidden_size=64, num_classes=3):
+        super(TLSTMModel, self).__init__()
+        self.input_size = input_size - 1  # 减去时间差那一维
+        self.hidden_size = hidden_size
+
+        self.input_layer = nn.Linear(self.input_size, hidden_size)
+        self.decay_layer = nn.Linear(1, hidden_size)  # 用时间差学习 decay gate
+
+        self.lstm_cell = nn.LSTMCell(hidden_size, hidden_size)
+        self.output_layer = nn.Linear(hidden_size, num_classes)
         self.dropout = nn.Dropout(0.5)
-        self.norm = nn.LayerNorm(hidden_size * 2)
-        self.fc = nn.Linear(hidden_size * 2, num_classes)
 
     def forward(self, x, lengths):
-        packed = nn.utils.rnn.pack_padded_sequence(x, lengths.cpu(), batch_first=True, enforce_sorted=False)
-        packed_out, (ht, ct) = self.lstm(packed)
-        out = self.fc(self.dropout(self.norm(torch.cat([ht[-2], ht[-1]], dim=1))))
-        return out  
+        # x shape: (batch, seq_len, input_size), 最后一列为 time_delta
+        batch_size, seq_len, _ = x.size()
+
+        h_t = torch.zeros(batch_size, self.hidden_size, device=x.device)
+        c_t = torch.zeros(batch_size, self.hidden_size, device=x.device)
+
+        for t in range(seq_len):
+            # Mask padding time steps
+            mask = (t < lengths).float().unsqueeze(1)
+
+            # Split input and time delta
+            time_delta = x[:, t, -1].unsqueeze(1)  # shape: (batch, 1)
+            features = x[:, t, :-1]  # shape: (batch, input_size - 1)
+
+            embedded = torch.tanh(self.input_layer(features))
+
+            # Compute decay from time delta
+            gamma = torch.sigmoid(self.decay_layer(time_delta)) 
+            c_t = c_t * gamma  # decay memory
+
+            h_t, c_t = self.lstm_cell(embedded, (h_t, c_t))
+            h_t = h_t * mask
+            c_t = c_t * mask
+
+        out = self.output_layer(self.dropout(h_t))
+        return out
+
+def check_the_time_difference(df):
+    df['Assessment_Date'] = pd.to_datetime(df['Assessment_Date'], format="%d%b%Y")
+
+    all_deltas = []
+    for pid, group in df.groupby('IDno'):
+        group = group.sort_values(by='Assessment_Date')
+        time_deltas = group['Assessment_Date'].diff().dt.days.fillna(0).values
+        all_deltas.extend(time_deltas[1:])  # 跳过第一条记录
+
+    all_deltas = np.array(all_deltas)
+
+    print("------ Time_Delta ------")
+    print(f"Number of sample: {len(all_deltas)}")
+    print(f"Min: {np.min(all_deltas)} 天")
+    print(f"Max: {np.max(all_deltas)} 天")
+    print(f"Ave: {np.mean(all_deltas):.2f} 天")
+    print(f"Midd: {np.median(all_deltas):.2f} 天")
+    print(f"25th: {np.percentile(all_deltas, 25):.2f} 天")
+    print(f"75th: {np.percentile(all_deltas, 75):.2f} 天")
+    print("number of unique time deltas:")
+    for days in [7, 14, 30, 60, 90, 180, 365]:
+        count = np.sum((np.abs(all_deltas - days) <= 3))  # 允许3天误差范围
+        print(f" ≈ {days} 天: {count} 次")
+
 
 
 def train_model_with_early_stopping(model, train_loader, val_loader, optimizer, loss_fn, num_epochs=100, patience=5):
@@ -156,6 +218,9 @@ def train_model_with_early_stopping(model, train_loader, val_loader, optimizer, 
         all_preds, all_labels = [], []
 
         for batch_x, batch_len, batch_y in train_loader:
+            batch_x = batch_x.to(device)
+            batch_len = batch_len.to(device)
+            batch_y = batch_y.to(device)
             optimizer.zero_grad()
             logits = model(batch_x, batch_len)
             loss = loss_fn(logits, batch_y)
@@ -171,8 +236,12 @@ def train_model_with_early_stopping(model, train_loader, val_loader, optimizer, 
         val_preds, val_labels = [], []
         with torch.no_grad():
             for batch_x, batch_len, batch_y in val_loader:
+                batch_x = batch_x.to(device)
+                batch_len = batch_len.to(device)
+                batch_y = batch_y.to(device)
                 logits = model(batch_x, batch_len)
-                preds = logits.argmax(dim=1)
+                probs = torch.softmax(logits, dim=1)
+                preds = (probs[:, 1] > 0.5).long()
                 val_preds.extend(preds.cpu().numpy())
                 val_labels.extend(batch_y.cpu().numpy())
         val_acc = accuracy_score(val_labels, val_preds)
@@ -191,18 +260,56 @@ def train_model_with_early_stopping(model, train_loader, val_loader, optimizer, 
 
     if best_model_state:
         model.load_state_dict(best_model_state)
+    
+    # evaluate on the validation set
+    model.eval()
+    all_preds, all_labels, all_probs = [], [], []
+    with torch.no_grad():
+        for batch_x, batch_len, batch_y in val_loader:
+            batch_x = batch_x.to(device)
+            batch_len = batch_len.to(device)
+            batch_y = batch_y.to(device)
+
+            logits = model(batch_x, batch_len)
+            probs = torch.softmax(logits, dim=1)
+            preds = (probs[:, 1] > 0.5).long()
+            probs = torch.softmax(logits, dim=1)[:, 1]
+        
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(batch_y.cpu().numpy())
+            all_probs.extend(probs.cpu().numpy())
+    acc = accuracy_score(all_labels, all_preds)
+    print(f"\nFinal Validation Accuracy: {acc:.4f}")
+    print("Classification Report:")
+    print(classification_report(all_labels, all_preds))
+    print("Confusion Matrix:")
+    print(confusion_matrix(all_labels, all_preds))
+    try:
+        roc_auc = roc_auc_score(all_labels, all_probs)
+        print(f"ROC AUC: {roc_auc:.4f}")
+    except ValueError:
+        print("ROC AUC could not be computed, likely due to insufficient positive/negative samples.")
     return model
 
 def evaluate_model(model, dataloader):
     model.eval()
     all_preds = []
     all_labels = []
+    all_probs = []
     with torch.no_grad():
         for batch_x, batch_len, batch_y in dataloader:
+            batch_x = batch_x.to(device)
+            batch_len = batch_len.to(device)
+            batch_y = batch_y.to(device)
+
             logits = model(batch_x, batch_len)
-            preds = logits.argmax(dim=1)
+            probs = torch.softmax(logits, dim=1)
+            preds = (probs[:, 1] > 0.5).long()
+            probs = torch.softmax(logits, dim=1)[:, 1]  # Get probabilities for the positive class
+
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(batch_y.cpu().numpy())
+            all_probs.extend(probs.cpu().numpy())
 
     acc = accuracy_score(all_labels, all_preds)
     print(f"\nEvaluation Accuracy: {acc:.4f}")
@@ -211,18 +318,35 @@ def evaluate_model(model, dataloader):
     print("Confusion Matrix:")
     print(confusion_matrix(all_labels, all_preds))
 
+    try:
+        roc_auc = roc_auc_score(all_labels, all_probs)
+        print(f"ROC AUC: {roc_auc:.4f}")
+    except ValueError:
+        print("ROC AUC could not be computed, likely due to insufficient positive/negative samples.")
 
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=1, gamma=2, weight=None):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.weight = weight
+
+    def forward(self, inputs, targets):
+        ce_loss = nn.CrossEntropyLoss(weight=self.weight)(inputs, targets)
+        pt = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        return focal_loss
 
 def search_best_model(X_seqs, y_seqs, lengths, id_list):
     hidden_sizes = [32, 64, 128, 256]
     learning_rates = [0.01, 0.001, 0.0005]
     batch_sizes = [16, 32, 64]
+    y_np = np.array([y.item() for y in y_seqs])
 
 
     best_acc = 0
     best_model = None
     best_config = {}
-    y_np = np.array([y.item() for y in y_seqs])
 
     for hidden_size in hidden_sizes:
         for lr in learning_rates:
@@ -239,17 +363,22 @@ def search_best_model(X_seqs, y_seqs, lengths, id_list):
                 train_loader = DataLoader(train_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=True)
                 test_loader = DataLoader(test_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False)
 
-                model = LSTMModel(input_size=X_seqs[0].shape[1], hidden_size=hidden_size, num_classes=len(np.unique(y_np)))
+                model = TLSTMModel(input_size=X_seqs[0].shape[1], hidden_size=hidden_size, num_classes=len(np.unique(y_np))).to(device)
+
                 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
                 y_np = np.array([y.item() for y in y_seqs])
-                class_weights = compute_class_weight('balanced', classes=np.unique(y_np), y=y_np)
-                weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
+                class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(y_np), y=y_np)
+                class_weights[1] *= 1.2
+                weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
+                # loss_fn = FocalLoss(weight=weights_tensor)
                 loss_fn = nn.CrossEntropyLoss(weight=weights_tensor)
+
+
 
                 # Train the model
                 model = train_model_with_early_stopping(
-                    model, train_loader, test_loader, optimizer, loss_fn, num_epochs=100, patience=15
+                    model, train_loader, test_loader, optimizer, loss_fn, num_epochs=100, patience=200
                 )
                 
                 # Evaluate on test set
@@ -259,14 +388,22 @@ def search_best_model(X_seqs, y_seqs, lengths, id_list):
 
                 with torch.no_grad():
                     for batch_x, batch_len, batch_y in test_loader:
+                        batch_x = batch_x.to(device)
+                        batch_len = batch_len.to(device)
+                        batch_y = batch_y.to(device)
                         logits = model(batch_x, batch_len)
-                        preds = logits.argmax(dim=1)
+                        probs = torch.softmax(logits, dim=1)
+                        preds = (probs[:, 1] > 0.5).long()
                         all_preds.extend(preds.cpu().numpy())
                         all_labels.extend(batch_y.cpu().numpy())
 
                     for batch_x, batch_len, batch_y in train_loader:
+                        batch_x = batch_x.to(device)
+                        batch_len = batch_len.to(device)
+                        batch_y = batch_y.to(device)
                         logits = model(batch_x, batch_len)
-                        preds = logits.argmax(dim=1)
+                        probs = torch.softmax(logits, dim=1)
+                        preds = (probs[:, 1] > 0.5).long()
                         train_preds.extend(preds.cpu().numpy())
                         train_labels.extend(batch_y.cpu().numpy())
 
@@ -292,8 +429,12 @@ def search_best_model(X_seqs, y_seqs, lengths, id_list):
     all_preds, all_labels = [], []
     with torch.no_grad():
         for batch_x, batch_len, batch_y in test_loader:
+            batch_x = batch_x.to(device)
+            batch_len = batch_len.to(device)
+            batch_y = batch_y.to(device)
             logits = best_model(batch_x, batch_len)
-            preds = logits.argmax(dim=1)
+            probs = torch.softmax(logits, dim=1)
+            preds = (probs[:, 1] > 0.5).long()
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(batch_y.cpu().numpy())
 
@@ -309,33 +450,38 @@ def search_best_model(X_seqs, y_seqs, lengths, id_list):
 
 def permutation_feature_importance(model, dataset, feature_idx, batch_size=32):
     # dataset: MalnutritionDataset (X_seqs, y_seqs)
-    # feature_idx: 要打乱的特征索引
     
     model.eval()
     loader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False)
     
-    # 计算原始准确率
+    # calculate baseline accuracy
     all_preds, all_labels = [], []
     with torch.no_grad():
         for batch_x, batch_len, batch_y in loader:
+            batch_x = batch_x.to(device)
+            batch_len = batch_len.to(device)
+            batch_y = batch_y.to(device)
             logits = model(batch_x, batch_len)
-            preds = logits.argmax(dim=1)
+            probs = torch.softmax(logits, dim=1)
+            preds = (probs[:, 1] > 0.5).long()
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(batch_y.cpu().numpy())
     baseline_acc = accuracy_score(all_labels, all_preds)
     
-    # 打乱feature_idx这个特征：针对batch里的所有序列和所有时间步进行打乱
     all_preds_perm, all_labels_perm = [], []
     with torch.no_grad():
         for batch_x, batch_len, batch_y in loader:
+            batch_x = batch_x.to(device)
+            batch_len = batch_len.to(device)
+            batch_y = batch_y.to(device)
             batch_x_perm = batch_x.clone()
-            # 打乱feature_idx这个维度的数值，沿batch和时间步维度打乱
             feat_values = batch_x_perm[:,:,feature_idx].flatten()
             permuted = feat_values[torch.randperm(feat_values.size(0))]
             batch_x_perm[:,:,feature_idx] = permuted.view(batch_x_perm.size(0), batch_x_perm.size(1))
             
             logits = model(batch_x_perm, batch_len)
-            preds = logits.argmax(dim=1)
+            probs = torch.softmax(logits, dim=1)
+            preds = (probs[:, 1] > 0.5).long()
             all_preds_perm.extend(preds.cpu().numpy())
             all_labels_perm.extend(batch_y.cpu().numpy())
     permuted_acc = accuracy_score(all_labels_perm, all_preds_perm)
@@ -343,49 +489,64 @@ def permutation_feature_importance(model, dataset, feature_idx, batch_size=32):
     importance = baseline_acc - permuted_acc
     return importance
 
-
-
-
 if __name__ == "__main__":
     set_seed(42)
-    df = pd.read_pickle("./datasets/cap_data.pkl")
+    device = torch.device("cpu")
+
+    # Check if CUDA is available and print device information
+    # print(torch.__version__)
+    # print(torch.version.cuda)
+    # print(torch.cuda.is_available())
+    # print(torch.cuda.get_device_name(0))
+    # print(torch.cuda.is_available()) 
+    # print(torch.cuda.get_device_name(0))  
+
+    df = pd.read_pickle("./datasets/mal_data.pkl")
+    # check_the_time_difference(df)
+    df['Malnutrition'] = df['Malnutrition'].apply(lambda x: 0 if x in [0, 1, 2] else 1)
+    
     X_seqs, y_seqs, lengths, id_list = prepare_sequence_data(df)
     # best_model, best_config = search_best_model(X_seqs, y_seqs, lengths, id_list)
+    print(f"Total sequences: {len(X_seqs)}")
+    print(f"Total labels: {len(y_seqs)}")
+    
     (train_X, train_y, train_len), (test_X, test_y, test_len) = split_sequence_dataset_by_id(X_seqs, y_seqs, lengths, id_list)
+    print(f"Train sequences: {len(train_X)}, Test sequences: {len(test_X)}")
+    print(f"Train labels: {len(train_y)}, Test labels: {len(test_y)}")
 
-    hidden_size = 256
-    learning_rate = 0.0005
-    batch_size = 64
-    y_np = np.array([y.item() for y in y_seqs])
+    hidden_size = 32
+    learning_rate = 0.001
+    batch_size = 32
 
     train_dataset = MalnutritionDataset(train_X, train_y)
     test_dataset = MalnutritionDataset(test_X, test_y)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False)
-    
-    
-    model = LSTMModel(input_size=X_seqs[0].shape[1], hidden_size=hidden_size, num_classes=len(np.unique(y_np)))
+    y_np = np.array([y.item() for y in y_seqs])
+    model = TLSTMModel(input_size=X_seqs[0].shape[1], hidden_size=hidden_size, num_classes=len(np.unique(y_np))).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    y_np = np.array([y.item() for y in y_seqs])
+    
 
     class_weights = compute_class_weight('balanced', classes=np.unique(y_np), y=y_np)
-    weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
+    weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
     loss_fn = nn.CrossEntropyLoss(weight=weights_tensor)
 
-    model = train_model_with_early_stopping(model, train_loader, test_loader, optimizer, loss_fn, num_epochs=100, patience=15)
+    # model = train_model_with_early_stopping(model, train_loader, test_loader, optimizer, loss_fn, num_epochs=1000, patience=1000)
 
-    evaluate_model(model, test_loader)
+    # evaluate_model(model, test_loader)
 
-    feature_num = X_seqs[0].shape[1]
-    importances = []
-    for i in range(feature_num):
-        imp = permutation_feature_importance(model, test_dataset, i)
-        importances.append(imp)
+    # feature_num = X_seqs[0].shape[1]
+    # importances = []
+    # for i in range(feature_num):
+    #     imp = permutation_feature_importance(model, test_dataset, i)
+    #     importances.append(imp)
 
-    feature_cols = [col for col in df.columns if col not in ['IDno', 'Assessment_Date', 'CAP_Nutrition']]
+    # feature_cols = [col for col in df.columns if col not in ['IDno', 'Assessment_Date', 'CAP_Nutrition']]
 
-    sorted_idx = np.argsort(importances)[::-1]
-    for i in sorted_idx[:10]:
-        print(f"Feature {feature_cols[i]} importance: {importances[i]:.4f}")
+    # sorted_idx = np.argsort(importances)[::-1]
+    # for i in sorted_idx[:10]:
+    #     print(f"Feature {feature_cols[i]} importance: {importances[i]:.4f}")
+
+

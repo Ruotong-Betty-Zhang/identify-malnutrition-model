@@ -47,63 +47,35 @@ def calculate_age(basic_info, extra_info):
     # Drop helper columns if needed
     result_df = merged_df.drop(columns=["IDNo", "Q3DoB", "Q4Age_BL", "Date1"])
 
-    # Drop all assessments where Age is NaN
-    result_df = result_df.dropna(subset=["Age"])
-
     # Optional: Preview
-    # print(result_df[["IDno", "Assessment_Date", "Age"]].head(10))
+    print(result_df[["IDno", "Assessment_Date", "Age"]].head(10))
 
     return result_df
-# def generate_gender_column_and_carelevel(basic_info, extra_info):
-#     # For every IDno, find the gender in extra_info['Q2Gender'] and care level in extra_info['CareLevel']
-#     # Initialize the Gender and CareLevel columns in basic_info
-#     basic_info['Gender'] = None
-#     basic_info['CareLevel'] = None
-#     for index, row in basic_info.iterrows():
-#         idno = row["IDno"]
-#         # Find the row in extra_info with the same IDno
-#         extra_row = extra_info[extra_info["IDNo"] == idno]
-#         if not extra_row.empty:
-#             # Set the gender and care level
-#             basic_info.at[index, 'Gender'] = extra_row.iloc[0]['Q2Gender']
-#             care_level = extra_row.iloc[0]['CareLevel']
-#             mapping = {'Hospital': 3, 'Dementia Unit': 2, 'Rest Home': 1, 'RH': 1}
-#             basic_info.at[index, 'CareLevel'] = mapping.get(care_level, None)
+def generate_gender_column_and_carelevel(basic_info, extra_info):
+    # For every IDno, find the gender in extra_info['Q2Gender'] and care level in extra_info['CareLevel']
+    # Initialize the Gender and CareLevel columns in basic_info
+    basic_info['Gender'] = None
+    basic_info['CareLevel'] = None
+    for index, row in basic_info.iterrows():
+        idno = row["IDno"]
+        # Find the row in extra_info with the same IDno
+        extra_row = extra_info[extra_info["IDNo"] == idno]
+        if not extra_row.empty:
+            # Set the gender and care level
+            basic_info.at[index, 'Gender'] = extra_row.iloc[0]['Q2Gender']
+            care_level = extra_row.iloc[0]['CareLevel']
+            mapping = {'Hospital': 3, 'Dementia Unit': 2, 'Rest Home': 1, 'RH': 1}
+            basic_info.at[index, 'CareLevel'] = mapping.get(care_level, None)
 
-#     print(basic_info[['IDno','CareLevel', 'Gender']].head(10))
-#     return basic_info
-
-def generate_gender_column_and_carelevel(basic_info: pd.DataFrame, extra_info: pd.DataFrame) -> pd.DataFrame:
-    # CareLevel 映射规则
-    carelevel_map = {'Hospital': 3, 'Dementia Unit': 2, 'Rest Home': 1, 'RH': 1}
-
-    # 选择需要的列并重命名
-    extra_info_subset = extra_info[['IDNo', 'Q2Gender', 'CareLevel']].copy()
-    extra_info_subset = extra_info_subset.rename(columns={
-        'IDNo': 'IDno',
-        'Q2Gender': 'Gender'
-    })
-
-    # 合并 basic_info 和 extra_info（按 IDno）
-    merged = basic_info.merge(extra_info_subset, on='IDno', how='left')
-
-    # 映射 CareLevel 为数字
-    merged['CareLevel'] = merged['CareLevel'].map(carelevel_map)
-
-    # 补全缺失值并转为整数（可选，也可以不填）
-    merged['Gender'] = pd.to_numeric(merged['Gender'], errors='coerce').fillna(-1).astype(int)
-    merged['CareLevel'] = merged['CareLevel'].fillna(-1).astype(int)
-
-    print(merged[['IDno', 'Gender', 'CareLevel']].head(10))
-    return merged
+    print(basic_info[['IDno','CareLevel', 'Gender']].head(10))
+    return basic_info
 
 def drop_columns(df):
     """Return a DataFrame with unnecessary columns dropped."""
-    result_df = df.copy(deep=True)
     # Drop all cols after iJ1g
     columns_to_keep = ['iJ1g', 'iJ1h', 'iJ1i', 'iJ12', 'iJ1', 'Age', 'Gender', 'CareLevel']
-    start_index = result_df.columns.get_loc('iJ1g')
-    cols_from_start = result_df.columns[start_index:]
+    start_index = df.columns.get_loc('iJ1g')
+    cols_from_start = df.columns[start_index:]
     cols_to_drop = [col for col in cols_from_start if col not in columns_to_keep]
 
     # drop iK4d: Dry mouth 
@@ -112,8 +84,8 @@ def drop_columns(df):
     additional_cols_to_drop = ["iK4d", "iNN2", "iJ1"]
     cols_to_drop.extend(additional_cols_to_drop)
     
-    result_df = result_df.drop(columns=cols_to_drop)
-    return result_df
+    df = df.drop(columns=cols_to_drop)
+    return df
 
 def average_fill_empty(df):
     """Fill NaN values in the DataFrame with the mean of each column."""
@@ -124,9 +96,8 @@ def average_fill_empty(df):
 
 def calculate_malnutrition(df):
     """Calculate malnutrition status based on specific columns and return a DataFrame with the new column."""
-    result_df = df.copy(deep=True)
-    result_df["Malnutrition"] = result_df.apply(get_malnutrition_status, axis=1)
-    return result_df
+    df["Malnutrition"] = df.apply(get_malnutrition_status, axis=1)
+    return df
 
 def get_malnutrition_status(row):
     if row["iK2a"] is None or row["iK2g"] is None or row["iG3"] is None or row["iE2a"] is None or row["iE2b"] is None or row["iE2c"] is None or row["iI1c"] is None:
@@ -154,6 +125,11 @@ def get_malnutrition_status(row):
     if row["iI1d"] in [1, 2, 3] and not dementia:
         score += 1
     return score
+
+def drop_cap_nutrition_rows(df):
+    """Drop rows where CAP_Nutrition is NaN and return the DataFrame."""
+    return df.dropna(subset=["CAP_Nutrition"])
+
 
 def check_missing_values(columns_to_check, df):
     """Check for missing values in the specified columns of the DataFrame."""
@@ -216,15 +192,9 @@ def calculate_feature_changes(df, exclude_columns=['IDno', 'Assessment_Date', 'M
     changed_df['Assessment_Date'] = pd.to_datetime(changed_df['Assessment_Date'])
 
     # Create new columns for the change in each feature
-    # 创建空的 DataFrame 来存储 change 列
-    change_cols = [
-        f"{col}_change" for col in changed_df.columns
-        if col not in exclude_columns and '_change' not in col
-    ]
-    change_df = pd.DataFrame(np.nan, index=changed_df.index, columns=change_cols)
-
-    # 一次性拼接，避免碎片化
-    changed_df = pd.concat([changed_df, change_df], axis=1)
+    for column in changed_df.columns:
+        if column not in exclude_columns and '_change' not in column:
+            changed_df[f"{column}_change"] = np.nan  # Initialize with NaN
 
     # Go through each patient
     for patient_id in changed_df['IDno'].unique():
@@ -259,9 +229,6 @@ def calculate_feature_changes(df, exclude_columns=['IDno', 'Assessment_Date', 'M
 
         # Remove the first assessment for each patient, as it has no previous assessment to compare to
         changed_df = changed_df[changed_df['Assessment_Date'] != patient_data.iloc[0]['Assessment_Date']] 
-
-        # Remove the empty columns that were created for change
-        changed_df = changed_df.drop(columns=[col for col in changed_df.columns if '_change' in col and changed_df[col].isnull().all()])
     return changed_df
 
 def knn_impute_missing_values(df, exclude_cols=['IDno', 'Assessment_Date'], n_neighbors=5):
@@ -388,9 +355,3 @@ def generate_model_input_list(df, save_path=None):
         print("Column list not saved, no path provided.")
     # Return the JSON string
     return f'[{column_list_json}]'
-
-def combine_malnutrition_labels(mal_df):
-    temp_df = mal_df.copy()
-    # Combine the malnutrition labels into binary values
-    temp_df['Malnutrition'] = temp_df['Malnutrition'].apply(lambda x: 0 if x in [0, 1, 2] else 1)
-    return temp_df
