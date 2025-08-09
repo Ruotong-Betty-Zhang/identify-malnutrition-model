@@ -8,6 +8,8 @@ from sklearn.metrics import classification_report, accuracy_score, confusion_mat
 from xgboost import XGBClassifier, plot_importance
 import json
 from sklearn.metrics import f1_score, recall_score, precision_score
+from sklearn.utils.class_weight import compute_sample_weight
+import shap
 
 class XGBoostModelTrainer:
     def __init__(self, seed=42, device='cuda'):
@@ -60,16 +62,32 @@ class XGBoostModelTrainer:
             params = parameters
 
         # 定义模型
+        device_setting = 'cpu'
         xgb = XGBClassifier(
             eval_metric='mlogloss',
             tree_method='hist',
-            device=self.device,
+            device=device_setting,
             random_state=self.seed
         )
 
+        # 根据任务类型确定 scoring
+        scoring_method = 'recall_macro' if len(np.unique(y)) > 2 else 'recall'
+
+        min_class_count = y.value_counts().min()
+        cv_folds = min(5, min_class_count)
+
         # 网格搜索
-        grid = GridSearchCV(xgb, params, cv=5, verbose=1, n_jobs=1)
-        grid.fit(X_train, y_train)
+        grid = GridSearchCV(
+            xgb,
+            param_grid=params,
+            scoring=scoring_method,
+            cv=cv_folds,
+            verbose=1,
+            n_jobs=1
+        )
+
+        sample_weights = compute_sample_weight(class_weight='balanced', y=y_train)
+        grid.fit(X_train, y_train, sample_weight=sample_weights)
 
         print("Best parameters found:", grid.best_params_)
         self.model = grid.best_estimator_
@@ -80,15 +98,15 @@ class XGBoostModelTrainer:
         print("Test Results:")
         print("Accuracy:", accuracy_score(y_test, y_test_pred))
         print("Confusion Matrix:\n", confusion_matrix(y_test, y_test_pred))
-        print("Classification Report:\n", classification_report(y_test, y_test_pred))
+        print("Classification Report:\n", classification_report(y_test, y_test_pred, zero_division=0))
 
         
 
         # 计算多分类指标（macro 是对每类分别计算再平均，不受类别不平衡影响）
         accuracy = accuracy_score(y_test, y_test_pred)
-        f1_macro = f1_score(y_test, y_test_pred, average='macro')
-        recall_macro = recall_score(y_test, y_test_pred, average='macro')  # Sensitivity
-        precision_macro = precision_score(y_test, y_test_pred, average='macro')
+        f1_macro = f1_score(y_test, y_test_pred, average='macro', zero_division=0)
+        recall_macro = recall_score(y_test, y_test_pred, average='macro', zero_division=0)  # Sensitivity
+        precision_macro = precision_score(y_test, y_test_pred, average='macro', zero_division=0)
 
         print("\n🔍 Multi-class Evaluation Metrics (macro average):")
         print(f"Accuracy       : {accuracy:.4f}")
@@ -96,12 +114,26 @@ class XGBoostModelTrainer:
         print(f"F1-score       : {f1_macro:.4f}")
         print(f"Precision      : {precision_macro:.4f}")
 
+        # 保存性能指标为 JSON
+        performance = {
+            "accuracy": round(accuracy, 4),
+            "macro_f1": round(f1_macro, 4),
+            "macro_recall": round(recall_macro, 4),
+            "macro_precision": round(precision_macro, 4),
+            "confusion_matrix": confusion_matrix(y_test, y_test_pred).tolist(),
+            "classification_report": classification_report(y_test, y_test_pred, zero_division=0, output_dict=True)
+        }
 
         # 子文件夹命名
         dataset_name = os.path.basename(dataset_path).split('.')[0]
         target_subfolder = os.path.join(output_folder, 'xgb_' + dataset_name)
         if not os.path.exists(target_subfolder):
             os.makedirs(target_subfolder)
+
+        performance_path = os.path.join(target_subfolder, f'{dataset_name}_xgb_performance.json')
+        with open(performance_path, 'w') as f:
+            json.dump(performance, f, indent=4)
+        print(f"Model performance saved to {performance_path}")
 
         # 保存模型
         model_path = os.path.join(target_subfolder, f'{dataset_name}_xgb_model.pkl')
@@ -153,6 +185,10 @@ class XGBoostModelTrainer:
         # top_features_str = ', '.join([f"{feat} ({imp:.2f}%)" for feat, imp in zip(top_features, top_importances)])
         top_features_str = ', '.join([f"{feat}" for feat, imp in zip(top_features, top_importances)])
         print(f"Top 12 features: {top_features_str}")
+        top_feature_path = os.path.join(target_subfolder, f'{dataset_name}_top12_features.json')
+        with open(top_feature_path, 'w') as f:
+            json.dump(top_features.tolist(), f, indent=2)
+        print(f"Top 12 features saved to {top_feature_path}")
 
 
         # # 可选：用 XGBoost 内置画法再画一张
@@ -163,6 +199,37 @@ class XGBoostModelTrainer:
         # plt.savefig(builtin_plot_path, dpi=300)
         # plt.close()
         # print(f"XGBoost built-in feature importance plot saved to {builtin_plot_path}")
+
+
+
+        # 拟合好模型后
+        explainer = shap.TreeExplainer(self.model)
+        shap_values = explainer.shap_values(X.values)
+
+        print("Type of shap_values:", type(shap_values))
+        if isinstance(shap_values, list):
+            print("shap_values is a list with length:", len(shap_values))
+            for i, val in enumerate(shap_values):
+                print(f"shap_values[{i}] shape:", np.array(val).shape)
+        else:
+            print("shap_values shape:", np.array(shap_values).shape)
+
+        # 可视化总体影响
+        plt.figure()
+        shap.summary_plot(shap_values, X, show=False)
+        plt.tight_layout()
+        summary_beeswarm_path = os.path.join(target_subfolder, f"{dataset_name}_shap_summary_beeswarm.png")
+        plt.savefig(summary_beeswarm_path, dpi=300)
+        plt.close()
+        print(f"SHAP beeswarm plot saved to {summary_beeswarm_path}")
+
+        plt.figure()
+        shap.summary_plot(shap_values, X, plot_type="bar", show=False)
+        plt.tight_layout()
+        summary_bar_path = os.path.join(target_subfolder, f"{dataset_name}_shap_summary_bar.png")
+        plt.savefig(summary_bar_path, dpi=300)
+        plt.close()
+        print(f"SHAP bar plot saved to {summary_bar_path}")
 
         return self.model
 
