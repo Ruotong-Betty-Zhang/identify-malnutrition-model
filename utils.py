@@ -6,6 +6,11 @@ from sklearn.impute import KNNImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
 from pandas.api.types import is_numeric_dtype
+from typing import Iterable, Optional, Union, Dict
+from collections import Counter
+
+from sklearn.preprocessing import OrdinalEncoder
+from imblearn.over_sampling import SMOTE, SMOTENC
 
 def calculate_age(basic_info, extra_info):
     """
@@ -394,3 +399,167 @@ def combine_malnutrition_labels(mal_df):
     # Combine the malnutrition labels into binary values
     temp_df['Malnutrition'] = temp_df['Malnutrition'].apply(lambda x: 0 if x in [0, 1, 2] else 1)
     return temp_df
+
+def smote_augment(
+    df: pd.DataFrame,
+    target_col: str,
+    cat_cols: Optional[Iterable[str]] = None,
+    cont_cols: Optional[Iterable[str]] = None,
+    id_cols: Optional[Iterable[str]] = None,
+    max_new_ratio: float = 0.5,
+    sampling_strategy: Union[str, float, Dict] = "auto",
+    k_neighbors: int = 5,
+    random_state: int = 42,
+) -> pd.DataFrame:
+    """
+    使用 SMOTE / SMOTE-NC 对表格型数据做过采样数据增强。
+    返回：原数据 + 新增合成样本（打乱顺序）
+
+    参数说明：
+    - target_col: 分类标签列名
+    - cat_cols: 分类/有序等级列（存在则用 SMOTE-NC）
+    - cont_cols: 连续列（如未提供会自动推断）
+    - id_cols: 标识性列（新增样本中置 NaN，避免误用）
+    - max_new_ratio: 新增样本相对于参与过采样的样本的上限比例
+    - sampling_strategy: imblearn 的采样策略（"auto" 或 dict）
+    - k_neighbors: SMOTE 的 k
+    - random_state: 随机种子
+    """
+    
+    rng = np.random.default_rng(random_state)
+    df = df.copy()
+
+    # 仅用有标签的行
+    mask = df[target_col].notna()
+    work = df.loc[mask].copy()
+
+    if id_cols is None:
+        id_cols = get_ignore_cols()
+    id_cols = [c for c in id_cols if c in work.columns]
+
+    # 自动推断
+    if cat_cols is None or cont_cols is None:
+        cont_cols = get_cont_col()
+        cat_cols = [c for c in work.columns if c not in cont_cols + id_cols and c != target_col]
+
+    cat_cols = [c for c in cat_cols if c in work.columns]
+    cont_cols = [c for c in cont_cols if c in work.columns]
+    feature_cols = cat_cols + cont_cols
+    if len(feature_cols) == 0:
+        raise ValueError("没有可用特征列：请设置 cat_cols/cont_cols 或检查数据。")
+
+    X_cat = work[cat_cols].copy() if cat_cols else pd.DataFrame(index=work.index)
+    X_cont = work[cont_cols].copy() if cont_cols else pd.DataFrame(index=work.index)
+    y = work[target_col].values
+
+    # 编码分类列（内部用），连续列保留
+    use_nc = bool(cat_cols)
+    if use_nc:
+        enc = OrdinalEncoder(
+            handle_unknown="use_encoded_value",
+            unknown_value=-1,
+            encoded_missing_value=-1,
+        )
+        X_cat_enc = pd.DataFrame(
+            enc.fit_transform(X_cat),
+            columns=cat_cols,
+            index=X_cat.index
+        )
+        Xn = pd.concat([X_cat_enc, X_cont], axis=1)
+        cat_indices = list(range(len(cat_cols)))
+    else:
+        Xn = X_cont.copy()
+
+    # 合理设置 k
+    from collections import Counter
+    cls_counts = Counter(y)
+    min_cls = min(cls_counts.values())
+    k_eff = min(k_neighbors, max(1, min_cls - 1))
+
+    # 选择 SMOTE / SMOTE-NC
+    if use_nc:
+        smote = SMOTENC(
+            categorical_features=cat_indices,
+            sampling_strategy=sampling_strategy,
+            k_neighbors=k_eff,
+            random_state=random_state,
+        )
+    else:
+        smote = SMOTE(
+            sampling_strategy=sampling_strategy,
+            k_neighbors=k_eff,
+            random_state=random_state,
+        )
+
+    # 过采样
+    X_res, y_res = smote.fit_resample(Xn.values, y)
+
+    # 控制新增量
+    n_orig = len(Xn)
+    n_new = len(X_res) - n_orig
+    if n_new <= 0:
+        out = df.sample(frac=1.0, random_state=random_state).reset_index(drop=True)
+    else:
+        max_new = int(n_orig * max_new_ratio)
+        keep_idx = rng.choice(n_new, size=max_new, replace=False) if (max_new > 0 and n_new > max_new) else np.arange(n_new)
+
+        X_new = X_res[-n_new:][keep_idx]
+        y_new = y_res[-n_new:][keep_idx]
+
+        # 反编码并组装新增样本（列名&顺序与原数据对齐）
+        if use_nc:
+            X_new_cat = X_new[:, :len(cat_cols)]
+            X_new_cont = X_new[:, len(cat_cols):]
+            X_new_cat = enc.inverse_transform(X_new_cat)
+            df_cat_new = pd.DataFrame(X_new_cat, columns=cat_cols)
+            df_cont_new = pd.DataFrame(X_new_cont, columns=cont_cols)
+            new_part = pd.concat([df_cat_new, df_cont_new], axis=1)
+        else:
+            new_part = pd.DataFrame(X_new, columns=cont_cols)
+
+        new_part[target_col] = y_new
+
+        # 对未在特征中的列补 NaN
+        for c in df.columns:
+            if c not in new_part.columns:
+                new_part[c] = np.nan
+
+        # 指定 id 列置 NaN
+        for c in id_cols:
+            if c in new_part.columns:
+                new_part[c] = np.nan
+
+        out = pd.concat([df, new_part], axis=0, ignore_index=True)
+        out = out.sample(frac=1.0, random_state=random_state).reset_index(drop=True)
+
+    # ===== 统一类型，保证不含 object =====
+    # 1) 连续列转为 float
+    for c in cont_cols:
+        if c in out.columns:
+            out[c] = pd.to_numeric(out[c], errors="coerce").astype(float)
+
+    # 2) 分类列转为 float（原 cat_cols）
+    for c in cat_cols:
+        if c in out.columns:
+            out[c] = pd.to_numeric(out[c], errors="coerce").astype(float)
+
+    return out
+
+
+def get_ignore_cols():
+    return [
+        'IDno', 'Assessment_Date'
+    ]
+
+def get_cont_col():
+    return [
+        'iG12', 'iK1ab', 'iK1bb', "Scale_ADLHierarchy", "Scale_ADLLongForm", "Scale_ADLShortForm",
+        "Scale_AggressiveBehaviour", "Scale_BMI", "Scale_CHESS", "Scale_Communication", "Scale_CPS",
+        "Scale_DRS", "Scale_IADLCapacity", "Scale_IADLPerformance", "Scale_MAPLE", "Scale_Pain",
+        "Scale_PressureUlcerRisk", "OverallUrgencyScale", 'Age'
+    ]
+
+def get_unknown_col():
+    return [
+        'O2f'
+    ]

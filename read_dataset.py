@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
 import locale
-from utils import calculate_age, drop_columns, combine_malnutrition_labels, calculate_malnutrition, generate_gender_column_and_carelevel, check_missing_values, fill_missing_by_idno_and_mode, calculate_feature_changes, knn_impute_missing_values,restore_integer_columns
+from utils import calculate_age, drop_columns, combine_malnutrition_labels, calculate_malnutrition, generate_gender_column_and_carelevel, calculate_feature_changes, knn_impute_missing_values,restore_integer_columns, smote_augment
 from dotenv import load_dotenv
 import os
 
@@ -58,6 +58,9 @@ cap_2.to_pickle(os.path.join(dataset_folder, 'CAP_2.pkl'))
 cap_long = calculate_feature_changes(cap_1)
 cap_long.to_pickle(os.path.join(dataset_folder, 'CAP_L.pkl'))
 
+cap_2_aug = smote_augment(cap_2, 'Malnutrition')
+cap_2_aug.to_pickle(os.path.join(dataset_folder, 'CAP_2_AUG.pkl'))
+
 # Generate mal df
 mal_1 = calculate_malnutrition(df)
 mal_1 = mal_1.drop(columns=["iK2a", "iK2g", "iG3", "iE2a", "iE2b", "iE2c", "iI1c", "iI1d", "CAP_Nutrition"])
@@ -71,12 +74,6 @@ mal_2.to_pickle(os.path.join(dataset_folder, 'MAL_2.pkl'))
 mal_long = calculate_feature_changes(mal_2)
 mal_long.to_pickle(os.path.join(dataset_folder, 'MAL_L.pkl'))
 
-# # 生成df的年龄分布图
-# plt.figure(figsize=(10, 6))
-# df['Age'].hist(bins=30, edgecolor='black')
-# plt.title('Age Distribution')
-# plt.xlabel('Age')
-# plt.ylabel('Frequency')
-# plt.grid(False)
-# plt.savefig(os.path.join(dataset_folder, 'age_distribution.png'))
-# plt.close()
+# Augment the data
+mal_2_aug = smote_augment(mal_2, 'Malnutrition')
+mal_2_aug.to_pickle(os.path.join(dataset_folder, 'MAL_2_AUG.pkl'))
