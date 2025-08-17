@@ -16,7 +16,7 @@ class XGBoostModelTrainer:
         self.model = None
         self.best_params = None
 
-    def train(self, dataset_path: str, output_folder: str, parameters=None):
+    def train(self, dataset_path: str, output_folder: str, parameters=None, test_on_original=False):
         # 确保输出文件夹存在
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
@@ -28,24 +28,58 @@ class XGBoostModelTrainer:
         df = pd.read_pickle(dataset_path)
         print(f"Dataset shape: {df.shape}")
 
-        # 删除无关列
-        df = df.drop(columns=['IDno', 'Assessment_Date'])
-
-        # 划分特征和标签
+        # 识别目标列
         if 'MAL' in dataset_path:
-            X = df.drop(columns=["Malnutrition"])
-            y = df["Malnutrition"]
+            target_col = "Malnutrition"
         elif 'CAP' in dataset_path:
-            X = df.drop(columns=["CAP_Nutrition"])
-            y = df["CAP_Nutrition"]
+            target_col = "CAP_Nutrition"
         else:
             print("Unknown dataset format. Please provide a valid dataset start with CAP or MAL.")
             return None
 
-        # 数据集拆分
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=self.seed)
-        print(f"Training set size: {X_train.shape[0]}")
-        print(f"Test set size: {X_test.shape[0]}")
+        # --- 根据 test_on_original 决定切分策略 ---
+        if test_on_original:
+            if 'IDno' not in df.columns:
+                raise ValueError("IDno 列不存在，无法仅在原始数据上测试。请确保增强前保留 IDno。")
+            orig_mask = df['IDno'].notna()
+            df_orig = df.loc[orig_mask]
+            if df_orig.empty:
+                raise ValueError("原始数据子集为空（IDno 全为 NaN）。")
+
+            stratify_y = df_orig[target_col] if df_orig[target_col].nunique() > 1 else None
+            train_idx_orig, test_idx = train_test_split(
+                df_orig.index,
+                test_size=0.2,
+                random_state=self.seed,
+                stratify=stratify_y
+            )
+            train_df = df.drop(index=test_idx)   # 训练集=整份数据剔除原始测试索引（含原始训练+全部增强）
+            test_df = df.loc[test_idx]           # 测试集=仅原始样本
+            print(f"[Split] test_on_original=True -> Test only from original samples (IDno notna).")
+        else:
+            stratify_y = df[target_col] if df[target_col].nunique() > 1 else None
+            train_idx, test_idx = train_test_split(
+                df.index,
+                test_size=0.2,
+                random_state=self.seed,
+                stratify=stratify_y
+            )
+            train_df = df.loc[train_idx]
+            test_df  = df.loc[test_idx]
+            print(f"[Split] test_on_original=False -> Standard random split on full dataset.")
+
+        # 丢弃无关列后构建 X/y
+        drop_cols = [c for c in ['IDno', 'Assessment_Date'] if c in df.columns]
+        X_train = train_df.drop(columns=drop_cols + [target_col])
+        y_train = train_df[target_col]
+        X_test  = test_df.drop(columns=drop_cols + [target_col])
+        y_test  = test_df[target_col]
+
+        print(f"Training set size: {X_train.shape[0]}  "
+            f"({'包含增强样本' if test_on_original else '可能包含增强样本'})")
+        print(f"Test set size: {X_test.shape[0]}      "
+            f"({'仅原始样本' if test_on_original else '原始+增强混合'})")
+
 
         # 参数搜索空间（可替换为更大空间）
         params = {
@@ -122,7 +156,7 @@ class XGBoostModelTrainer:
         indices = np.argsort(importances_pct)[::-1]
         top_n = 12
         top_indices = indices[:top_n]
-        top_features = X.columns[top_indices]
+        top_features = X_train.columns[top_indices]
         top_importances = importances_pct[top_indices]
         # Print the top 12 features in one line
         # top_features_str = ', '.join([f"{feat} ({imp:.2f}%)" for feat, imp in zip(top_features, top_importances)])

@@ -126,12 +126,12 @@ xgb_model = xgb.XGBoostModelTrainer(seed=42)
 # # # Accuracy: 0.8188, macro recall: 0.62, weight recall: 0.82
 # xgb_model.train(os.path.join(dataset_folder, 'CAP_L.pkl'), model_output)
 
+
+
+
+
 # Train the model on MAL_2_AUG dataset
-# Best parameters found: {'colsample_bytree': 1, 'learning_rate': 0.1, 'max_depth': 5, 'n_estimators': 200, 'subsample': 0.6}
-xgb_model.train(os.path.join(dataset_folder, 'MAL_2_AUG.pkl'), model_output, parameters={
-    'colsample_bytree': 1,
-    'learning_rate': 0.1,
-    'max_depth': 5,
-    'n_estimators': 200,
-    'subsample': 0.6
-})
+# Best parameters found: {'colsample_bytree': 0.6, 'learning_rate': 0.1, 'max_depth': 5, 'n_estimators': 200, 'subsample': 0.6}
+# xgb_model.train(os.path.join(dataset_folder, 'MAL_2_AUG.pkl'), model_output, test_on_original=True)
+
+xgb_model.train(os.path.join(dataset_folder, 'CAP_2_AUG.pkl'), model_output, test_on_original=True)
