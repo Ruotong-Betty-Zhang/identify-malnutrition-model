@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
 import locale
-from utils import calculate_age, drop_columns, combine_malnutrition_labels, calculate_malnutrition, generate_gender_column_and_carelevel, check_missing_values, fill_missing_by_idno_and_mode, calculate_feature_changes, knn_impute_missing_values,restore_integer_columns
+from utils import calculate_age, drop_columns, combine_malnutrition_labels, calculate_malnutrition, generate_gender_column_and_carelevel, check_missing_values, fill_missing_by_idno_and_mode, calculate_feature_changes, knn_impute_missing_values,restore_integer_columns,knn_Classifier
 from dotenv import load_dotenv
 import os
 
@@ -44,6 +44,7 @@ df = drop_columns(df)
 df = df.dropna(subset=["CAP_Nutrition"])
 temp_df = df.copy(deep=True)
 df = knn_impute_missing_values(df)
+# df = knn_Classifier(df)
 df = restore_integer_columns(df, original_df=temp_df)
 
 # Generate cap df
