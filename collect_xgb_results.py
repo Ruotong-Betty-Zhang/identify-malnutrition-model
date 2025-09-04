@@ -1,7 +1,7 @@
 import os, json, pandas as pd
 from dotenv import load_dotenv
 
-def collect_xgb_results(model_output: str, save_csv: bool = True, csv_name: str = "xgb_results_summary.csv") -> pd.DataFrame:
+def collect_xgb_results(model_output: str, save_csv: bool = True, csv_name: str = "xgb_results_summary_with_knn_classifier.csv") -> pd.DataFrame:
     rows = []
     if not os.path.isdir(model_output):
         raise FileNotFoundError(f"MODEL_OUTPUT not found: {model_output}")
