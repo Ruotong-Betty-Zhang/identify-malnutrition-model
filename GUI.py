@@ -422,7 +422,7 @@ class ModelEvaluationApp:
             widget.destroy()
         
         if self.feature_importances is None:
-            ttk.Label(self.fi_frame, text="Feature importance not available for this model").pack(pady=20)
+            ttk.Label(self.fi_frame, text="Feature importance not available for this model").pack(pady=12)
             return
         
         try:
@@ -439,8 +439,8 @@ class ModelEvaluationApp:
                 fi_data.sort(key=lambda x: x[1], reverse=True)
             
             # 创建特征重要性图表
-            fig, ax = plt.subplots(figsize=(12, 8))
-            features = [x[0] for x in fi_data[:20]]  # 显示前20个最重要的特征
+            fig, ax = plt.subplots(figsize=(14, 8))
+            features = [x[0] for x in fi_data[:12]]  # 显示前12个最重要的特征
             importances = [x[1] for x in fi_data[:20]]
             
             y_pos = np.arange(len(features))
@@ -449,7 +449,7 @@ class ModelEvaluationApp:
             ax.set_yticklabels(features)
             ax.invert_yaxis()
             ax.set_xlabel('Feature Importance')
-            ax.set_title('Top 20 Feature Importances')
+            ax.set_title('Top 12 Feature Importances')
             
             canvas = FigureCanvasTkAgg(fig, master=self.fi_frame)
             canvas.draw()
@@ -524,22 +524,188 @@ class ModelEvaluationApp:
             widget.destroy()
         
         try:
-            if hasattr(self.model, 'predict_proba'):
-                explainer = shap.Explainer(self.model, X_test)
-                shap_values = explainer(X_test)
+            # 使用您XGBoost代码中的数值化清洗方法
+            def _sanitize(df: pd.DataFrame) -> pd.DataFrame:
+                out = df.copy()
+                out = out.replace({None: np.nan}).replace([np.inf, -np.inf], np.nan)
+                for c in out.columns:
+                    s = out[c]
+                    if s.dtype == bool:
+                        out[c] = s.astype(np.int8); continue
+                    if pd.api.types.is_categorical_dtype(s):
+                        out[c] = s.cat.add_categories(["__NA__"]).fillna("__NA__").cat.codes.astype(np.int32); continue
+                    if s.dtype == object or pd.api.types.is_object_dtype(s):
+                        num = pd.to_numeric(s, errors="coerce")
+                        if num.notna().mean() >= 0.6:
+                            out[c] = num
+                        else:
+                            codes, _ = pd.factorize(s.astype(str), sort=False)
+                            out[c] = codes.astype(np.int32)
+                return out.astype(np.float32)
+
+            X_num = _sanitize(X_test)
+            if not isinstance(X_num, pd.DataFrame):
+                X_num = pd.DataFrame(X_num, columns=[f"Feature_{i}" for i in range(X_num.shape[1])])
+
+            # beeswarm 用「可读列名」的副本
+            X_num_disp = self._with_readable_columns(X_num)
+
+            # 解释器
+            try:
+                explainer = shap.TreeExplainer(self.model, model_output="raw")
+                sv = explainer.shap_values(X_num)
+            except Exception as e:
+                print(f"[SHAP] Explainer failed: {e}")
+                # 尝试使用KernelExplainer作为备选
+                try:
+                    def predict_proba_wrapper(X):
+                        return self.model.predict_proba(X)
+                    
+                    background = shap.sample(X_num, min(100, len(X_num)))
+                    explainer = shap.KernelExplainer(predict_proba_wrapper, background)
+                    sv = explainer.shap_values(X_num.iloc[:50])  # 只计算前50个样本以减少计算时间
+                except Exception as e2:
+                    raise Exception(f"Both TreeExplainer and KernelExplainer failed: {e2}")
+
+            # 统一成 list[n_classes]，每个 (n_samples, n_features)
+            if isinstance(sv, list):
+                sv_list = sv
+            else:
+                arr = np.asarray(sv)
+                if arr.ndim == 3:
+                    n, a, b = arr.shape
+                    if a == getattr(self.model, "n_classes_", a) and b == X_num.shape[1]:
+                        arr = np.transpose(arr, (1, 0, 2))  # (classes, samples, features)
+                    elif n == getattr(self.model, "n_classes_", n) and a == X_num.shape[0]:
+                        pass
+                    elif b == getattr(self.model, "n_classes_", b) and a == X_num.shape[1]:
+                        arr = np.transpose(arr, (2, 0, 1))
+                    else:
+                        arr = np.transpose(arr, (1, 0, 2))
+                    sv_list = [arr[i] for i in range(arr.shape[0])]
+                elif arr.ndim == 2:
+                    # 二分类时只出一张
+                    fig, ax = plt.subplots(figsize=(12, 8))
+                    shap.summary_plot(arr, X_num_disp, plot_type="dot", max_display=12, show=False)
+                    plt.title("SHAP Beeswarm (Binary Classification)")
+                    plt.tight_layout()
+                    
+                    canvas = FigureCanvasTkAgg(fig, master=self.shap_frame)
+                    canvas.draw()
+                    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                    print("SHAP analysis for binary classification completed")
+                    return
+                else:
+                    raise ValueError(f"Unexpected SHAP values shape: {arr.shape}")
+
+            # 创建选项卡显示多分类结果
+            notebook = ttk.Notebook(self.shap_frame)
+            notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            class_ids = getattr(self.model, "classes_", list(range(len(sv_list))))
+            y_true = np.asarray(self.y_test)
+            max_display = 12
+            h = max(6, 0.58 * max_display + 1.5)
+
+            # 为每个类别创建选项卡
+            for ci, sv_c in enumerate(sv_list):
+                mask_pos = (y_true == class_ids[ci])
+                if mask_pos.sum() < 5:
+                    print(f"Skip class {class_ids[ci]} Positives: only {mask_pos.sum()} samples.")
+                    continue
+
+                # 为每个类别创建frame
+                class_frame = ttk.Frame(notebook)
+                notebook.add(class_frame, text=f"Class {class_ids[ci]}")
+
+                # 创建图表
+                fig, ax = plt.subplots(figsize=(13.5, max(h, 8)))
+                shap.summary_plot(sv_c[mask_pos], X_num_disp.iloc[mask_pos],
+                                plot_type="dot", max_display=max_display, show=False)
+                plt.title(f"SHAP Beeswarm — Class {class_ids[ci]} (Positives)")
+                plt.tight_layout()
                 
-                fig, ax = plt.subplots(figsize=(12, 8))
-                shap.summary_plot(shap_values, X_test, show=False)
-                
-                canvas = FigureCanvasTkAgg(fig, master=self.shap_frame)
+                # 嵌入到GUI
+                canvas = FigureCanvasTkAgg(fig, master=class_frame)
                 canvas.draw()
                 canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-            else:
-                ttk.Label(self.shap_frame, text="SHAP analysis not supported").pack(pady=20)
+                
+                # 添加说明
+                info_label = ttk.Label(
+                    class_frame, 
+                    text=f"Showing SHAP values for {mask_pos.sum()} samples actually belonging to class {class_ids[ci]}",
+                    font=('Arial', 9), 
+                    foreground='gray'
+                )
+                info_label.pack(pady=5)
+                
+            # 如果没有找到任何有效的类别，显示错误信息
+            if notebook.index("end") == 0:
+                error_label = ttk.Label(
+                    self.shap_frame, 
+                    text="No valid class data found for SHAP analysis. Please check if there are enough samples for each class.",
+                    justify=tk.LEFT
+                )
+                error_label.pack(pady=20)
                 
         except Exception as e:
-            ttk.Label(self.shap_frame, text=f"SHAP error: {str(e)}").pack(pady=20)
+            # 显示详细的错误信息
+            error_frame = ttk.Frame(self.shap_frame)
+            error_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            ttk.Label(error_frame, text="SHAP Analysis Error", font=("Arial", 12, "bold")).pack(pady=5)
+            ttk.Label(error_frame, text=f"Error: {str(e)}").pack(pady=2)
+            
+            # 显示数据类型信息
+            if hasattr(self, 'X_test'):
+                dtype_info = "Data types in features:\n"
+                for col, dtype in self.X_test.dtypes.items():
+                    dtype_info += f"  {col}: {dtype}\n"
+                
+                text_widget = scrolledtext.ScrolledText(error_frame, height=8, width=60)
+                text_widget.pack(pady=10, fill=tk.BOTH, expand=True)
+                text_widget.insert(tk.END, dtype_info)
+                text_widget.config(state=tk.DISABLED)
+
+    def _with_readable_columns(self, X: pd.DataFrame) -> pd.DataFrame:
+        """返回用于绘图的列名副本（可读名称）"""
+        # 如果没有特征名称映射，使用原始列名
+        if not hasattr(self, 'feature_name_map') or not self.feature_name_map:
+            return X.copy()
+        
+        # 创建可读的列名
+        readable_columns = []
+        for col in X.columns:
+            base_col = re.sub(r"(_scaled|_std|_lag\d+|_zscore)$", "", str(col))
+            readable_name = self.feature_name_map.get(base_col, col)
+            readable_columns.append(readable_name)
+        
+        X_disp = X.copy()
+        X_disp.columns = readable_columns
+        return X_disp
+
+    def _compose_display_labels(self, names, codes):
+        """名称与代码合并为唯一标签：Name (Code)"""
+        labels = []
+        for n, c in zip(names, codes):
+            if str(n) == str(c):
+                labels.append(str(n))
+            else:
+                labels.append(f"{n} ({c})")
+        return labels
+
+    def _map_feature_names(self, cols):
+        """将特征代码映射为可读名称"""
+        if not hasattr(self, 'feature_name_map') or not self.feature_name_map:
+            return list(cols)
+        
+        readable_names = []
+        for col in cols:
+            base_col = re.sub(r"(_scaled|_std|_lag\d+|_zscore)$", "", str(col))
+            readable_names.append(self.feature_name_map.get(base_col, col))
     
+        return readable_names
+        
     def update_data_preview(self):
         for widget in self.preview_frame.winfo_children():
             widget.destroy()
