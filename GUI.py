@@ -12,6 +12,9 @@ import joblib
 import shap
 import threading
 import warnings
+import re
+from matplotlib.figure import Figure
+
 warnings.filterwarnings('ignore')
 
 class ModelEvaluationApp:
@@ -20,6 +23,7 @@ class ModelEvaluationApp:
         self.root.title("Machine Learning Model Evaluation Tool")
         self.root.geometry("1200x800")
         self.root.resizable(True, True)
+        self._mpl_refs = [] 
         
         # Initialize variables
         self.dataset = None
@@ -256,13 +260,14 @@ class ModelEvaluationApp:
                     continue
             
             # 处理日期时间列
-            if self.handle_datetime.get() and (col_dtype == 'datetime64[ns]' or 'date' in col.lower() or 'time' in col.lower()):
-                try:
-                    X_processed = X_processed.drop(columns=[col])
-                    preprocessing_info["removed_columns"].append(col)
-                except:
-                    X_processed = X_processed.drop(columns=[col])
-                    preprocessing_info["removed_columns"].append(col)
+            from pandas.api.types import is_datetime64_any_dtype
+
+            # 处理日期时间列
+            if self.handle_datetime.get() and is_datetime64_any_dtype(X_processed[col]):
+                X_processed = X_processed.drop(columns=[col])
+                preprocessing_info["removed_columns"].append(col)
+                continue
+
             
             # 处理分类变量
             elif self.handle_categorical.get() and col_dtype == 'object':
@@ -364,17 +369,20 @@ class ModelEvaluationApp:
             self.y_pred = self.model.predict(X_test)
             
             # 计算指标
+            # 统一类标签（基于全量 y）
+            classes = np.unique(y)
+
             accuracy = accuracy_score(y_test, self.y_pred)
-            cm = confusion_matrix(y_test, self.y_pred)
-            report = classification_report(y_test, self.y_pred)
-            
-            # 更新UI
+            cm = confusion_matrix(y_test, self.y_pred, labels=classes)
+            report = classification_report(y_test, self.y_pred, labels=classes, zero_division=0)
+
             self.root.after(0, self.update_accuracy_tab, accuracy, preprocessing_info)
-            self.root.after(0, self.update_cm_tab, cm, np.unique(y))
+            self.root.after(0, self.update_cm_tab, cm, classes)  # 传同一份 classes
             self.root.after(0, self.update_report_tab, report)
             self.root.after(0, self.update_feature_importance_tab, X_aligned.columns)
             self.root.after(0, self.update_shap_tab, X_test)
             self.root.after(0, self.update_alignment_info_tab, alignment_info)
+
             
             self.status_var.set("Evaluation completed")
             
@@ -439,10 +447,12 @@ class ModelEvaluationApp:
                 fi_data.sort(key=lambda x: x[1], reverse=True)
             
             # 创建特征重要性图表
-            fig, ax = plt.subplots(figsize=(14, 8))
-            features = [x[0] for x in fi_data[:12]]  # 显示前12个最重要的特征
-            importances = [x[1] for x in fi_data[:20]]
-            
+            fig = Figure(figsize=(14, 8))              # 新
+            ax = fig.add_subplot(111)
+            top_k = 12
+            features = [x[0] for x in fi_data[:top_k]]
+            importances = [x[1] for x in fi_data[:top_k]]
+                        
             y_pos = np.arange(len(features))
             ax.barh(y_pos, importances, align='center')
             ax.set_yticks(y_pos)
@@ -454,6 +464,7 @@ class ModelEvaluationApp:
             canvas = FigureCanvasTkAgg(fig, master=self.fi_frame)
             canvas.draw()
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            self._mpl_refs.append(canvas)  
             
             # 添加详细的特征重要性表格
             frame = ttk.Frame(self.fi_frame)
@@ -498,9 +509,11 @@ class ModelEvaluationApp:
         for widget in self.cm_frame.winfo_children():
             widget.destroy()
         
-        fig, ax = plt.subplots(figsize=(8, 6))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                   xticklabels=class_names, yticklabels=class_names, ax=ax)
+        # fig, ax = plt.subplots(figsize=(8, 6))
+        fig = Figure(figsize=(8, 6))                # 新
+        ax = fig.add_subplot(111)
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                    xticklabels=class_names, yticklabels=class_names, ax=ax)
         ax.set_xlabel('Predicted Labels')
         ax.set_ylabel('True Labels')
         ax.set_title('Confusion Matrix')
@@ -508,6 +521,7 @@ class ModelEvaluationApp:
         canvas = FigureCanvasTkAgg(fig, master=self.cm_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self._mpl_refs.append(canvas)
     
     def update_report_tab(self, report):
         for widget in self.report_frame.winfo_children():
@@ -547,125 +561,153 @@ class ModelEvaluationApp:
             if not isinstance(X_num, pd.DataFrame):
                 X_num = pd.DataFrame(X_num, columns=[f"Feature_{i}" for i in range(X_num.shape[1])])
 
-            # beeswarm 用「可读列名」的副本
-            X_num_disp = self._with_readable_columns(X_num)
-
             # 解释器
             try:
                 explainer = shap.TreeExplainer(self.model, model_output="raw")
                 sv = explainer.shap_values(X_num)
-            except Exception as e:
-                print(f"[SHAP] Explainer failed: {e}")
-                # 尝试使用KernelExplainer作为备选
+            except Exception:
                 try:
-                    def predict_proba_wrapper(X):
-                        return self.model.predict_proba(X)
-                    
-                    background = shap.sample(X_num, min(100, len(X_num)))
-                    explainer = shap.KernelExplainer(predict_proba_wrapper, background)
-                    sv = explainer.shap_values(X_num.iloc[:50])  # 只计算前50个样本以减少计算时间
+                    explainer = shap.LinearExplainer(self.model, X_num, feature_dependence="independent")
+                    sv = explainer.shap_values(X_num)
                 except Exception as e2:
-                    raise Exception(f"Both TreeExplainer and KernelExplainer failed: {e2}")
-
-            # 统一成 list[n_classes]，每个 (n_samples, n_features)
-            if isinstance(sv, list):
-                sv_list = sv
-            else:
-                arr = np.asarray(sv)
-                if arr.ndim == 3:
-                    n, a, b = arr.shape
-                    if a == getattr(self.model, "n_classes_", a) and b == X_num.shape[1]:
-                        arr = np.transpose(arr, (1, 0, 2))  # (classes, samples, features)
-                    elif n == getattr(self.model, "n_classes_", n) and a == X_num.shape[0]:
-                        pass
-                    elif b == getattr(self.model, "n_classes_", b) and a == X_num.shape[1]:
-                        arr = np.transpose(arr, (2, 0, 1))
-                    else:
-                        arr = np.transpose(arr, (1, 0, 2))
-                    sv_list = [arr[i] for i in range(arr.shape[0])]
-                elif arr.ndim == 2:
-                    # 二分类时只出一张
-                    fig, ax = plt.subplots(figsize=(12, 8))
-                    shap.summary_plot(arr, X_num_disp, plot_type="dot", max_display=12, show=False)
-                    plt.title("SHAP Beeswarm (Binary Classification)")
-                    plt.tight_layout()
-                    
-                    canvas = FigureCanvasTkAgg(fig, master=self.shap_frame)
-                    canvas.draw()
-                    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-                    print("SHAP analysis for binary classification completed")
+                    print(f"[SHAP] Explainer failed: {e2}")
                     return
-                else:
-                    raise ValueError(f"Unexpected SHAP values shape: {arr.shape}")
 
-            # 创建选项卡显示多分类结果
+            # ---- 统一成 list[n_classes]，每个元素形状为 (n_samples, n_features) ----
+            def _split_sv_to_list(sv_val, n_classes_hint=None):
+                # sv 可能是 list、(n_samples,n_features)、(n_samples,n_classes,n_features)
+                # 或 (n_samples,n_features,n_classes)
+                if isinstance(sv_val, list):
+                    return sv_val
+
+                arr = np.asarray(sv_val)
+                if arr.ndim == 2:
+                    # 二分类/回归：一个输出
+                    return [arr]
+
+                if arr.ndim == 3:
+                    # 猜测类别所在维度：优先用 model.classes_ 或 y_test 的唯一类数
+                    if n_classes_hint is None:
+                        n_classes_hint = len(getattr(self.model, "classes_", [])) or len(np.unique(self.y_test))
+
+                    # 优先匹配“某一维 == n_classes_hint”
+                    for axis, size in enumerate(arr.shape):
+                        if n_classes_hint and size == n_classes_hint:
+                            return [np.take(arr, i, axis=axis) for i in range(size)]
+
+                    # 次优：若最后一维比较小（<=10）当作类别维
+                    if arr.shape[-1] <= 10:
+                        return [arr[..., i] for i in range(arr.shape[-1])]
+                    # 再次优：若中间维比较小（<=10）当作类别维
+                    if arr.shape[1] <= 10:
+                        return [arr[:, i, :] for i in range(arr.shape[1])]
+                    # 兜底：按第一维切（多数树模型的旧返回）
+                    return [arr[i] for i in range(arr.shape[0])]
+
+                raise ValueError(f"Unexpected SHAP shape: {arr.shape}")
+
+            # 基于 hint 进行拆分
+            n_classes_hint = len(getattr(self.model, "classes_", [])) or len(np.unique(self.y_test))
+            sv_list = _split_sv_to_list(sv, n_classes_hint=n_classes_hint)
+
+            # ---- 类别标签对齐：以 sv_list 的长度为准，避免越界 ----
+            model_classes = getattr(self.model, "classes_", None)
+            if isinstance(model_classes, (list, np.ndarray)) and len(model_classes) == len(sv_list):
+                class_ids = list(model_classes)
+            else:
+                # 用测试集出现的类与 sv_list 对齐，否则退化为 0..n-1
+                test_classes = list(np.unique(self.y_test))
+                if len(test_classes) == len(sv_list):
+                    class_ids = test_classes
+                else:
+                    class_ids = list(range(len(sv_list)))
+            
+            # 创建主选项卡
             notebook = ttk.Notebook(self.shap_frame)
             notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-            
-            class_ids = getattr(self.model, "classes_", list(range(len(sv_list))))
-            y_true = np.asarray(self.y_test)
-            max_display = 12
-            h = max(6, 0.58 * max_display + 1.5)
+
+            # 计算每个类别的平均SHAP绝对值（特征重要性）
+            shap_importance_by_class = {}
+            for ci, sv_c in enumerate(sv_list):
+                # 平均绝对SHAP值作为特征重要性
+                mean_abs_shap = np.mean(np.abs(sv_c), axis=0)
+                shap_importance_by_class[class_ids[ci]] = mean_abs_shap
 
             # 为每个类别创建选项卡
             for ci, sv_c in enumerate(sv_list):
-                mask_pos = (y_true == class_ids[ci])
-                if mask_pos.sum() < 5:
-                    print(f"Skip class {class_ids[ci]} Positives: only {mask_pos.sum()} samples.")
-                    continue
-
-                # 为每个类别创建frame
                 class_frame = ttk.Frame(notebook)
                 notebook.add(class_frame, text=f"Class {class_ids[ci]}")
 
-                # 创建图表
-                fig, ax = plt.subplots(figsize=(13.5, max(h, 8)))
-                shap.summary_plot(sv_c[mask_pos], X_num_disp.iloc[mask_pos],
-                                plot_type="dot", max_display=max_display, show=False)
-                plt.title(f"SHAP Beeswarm — Class {class_ids[ci]} (Positives)")
-                plt.tight_layout()
-                
-                # 嵌入到GUI
-                canvas = FigureCanvasTkAgg(fig, master=class_frame)
-                canvas.draw()
-                canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-                
-                # 添加说明
-                info_label = ttk.Label(
-                    class_frame, 
-                    text=f"Showing SHAP values for {mask_pos.sum()} samples actually belonging to class {class_ids[ci]}",
-                    font=('Arial', 9), 
-                    foreground='gray'
-                )
-                info_label.pack(pady=5)
-                
-            # 如果没有找到任何有效的类别，显示错误信息
-            if notebook.index("end") == 0:
-                error_label = ttk.Label(
-                    self.shap_frame, 
-                    text="No valid class data found for SHAP analysis. Please check if there are enough samples for each class.",
-                    justify=tk.LEFT
-                )
-                error_label.pack(pady=20)
+                # 创建子选项卡（Beeswarm和雷达图）
+                class_notebook = ttk.Notebook(class_frame)
+                class_notebook.pack(fill=tk.BOTH, expand=True)
+
+                # Beeswarm图标签页
+                beeswarm_frame = ttk.Frame(class_notebook)
+                class_notebook.add(beeswarm_frame, text="Beeswarm Plot")
+
+                mask_pos = (np.array(self.y_test) == class_ids[ci])
+                if mask_pos.sum() >= 5:
+                    X_num_disp = self._with_readable_columns(X_num)
+
+                    # —— 关键：为 SHAP 专门创建一个新的 pyplot figure —— #
+                    fig_beeswarm = plt.figure(figsize=(12, 8))
+                    shap.summary_plot(
+                        sv_c[mask_pos], X_num_disp.iloc[mask_pos],
+                        plot_type="dot", max_display=12, show=False
+                    )
+                    fig_beeswarm.tight_layout()
+
+                    canvas_beeswarm = FigureCanvasTkAgg(fig_beeswarm, master=beeswarm_frame)
+                    canvas_beeswarm.draw()
+                    canvas_beeswarm.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+                    # 保存引用并从 pyplot 注销，避免影响后续图形
+                    self._mpl_refs.append(canvas_beeswarm)
+                    plt.close(fig_beeswarm)
+                else:
+                    ttk.Label(
+                        beeswarm_frame,
+                        text=f"Not enough samples ({mask_pos.sum()}) for beeswarm plot"
+                    ).pack(pady=20)
+
+                # 雷达图标签页
+                radar_frame = ttk.Frame(class_notebook)
+                class_notebook.add(radar_frame, text="Radar Chart")
+
+                # 创建雷达图
+                self._create_shap_radar_chart(radar_frame, shap_importance_by_class[class_ids[ci]], 
+                                            X_num.columns, class_ids[ci])
+
+            # # 添加比较所有类别的雷达图标签页
+            # comparison_frame = ttk.Frame(notebook)
+            # notebook.add(comparison_frame, text="Class Comparison")
+
+            # 创建比较所有类别的雷达图
+            # shap_importance_by_class = {}
+            # for ci, sv_c in enumerate(sv_list):
+            #     mean_abs_shap = np.mean(np.abs(sv_c), axis=0)  # (n_features,)
+            #     shap_importance_by_class[class_ids[ci]] = mean_abs_shap
+
+            comparison_frame = ttk.Frame(notebook)
+            notebook.add(comparison_frame, text="Class Comparison")
+
+            available_classes = list(shap_importance_by_class.keys())
+            self._create_comparison_radar_chart(
+                comparison_frame,
+                shap_importance_by_class,
+                X_num.columns,
+                available_classes
+            )
                 
         except Exception as e:
-            # 显示详细的错误信息
-            error_frame = ttk.Frame(self.shap_frame)
-            error_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-            
-            ttk.Label(error_frame, text="SHAP Analysis Error", font=("Arial", 12, "bold")).pack(pady=5)
-            ttk.Label(error_frame, text=f"Error: {str(e)}").pack(pady=2)
-            
-            # 显示数据类型信息
-            if hasattr(self, 'X_test'):
-                dtype_info = "Data types in features:\n"
-                for col, dtype in self.X_test.dtypes.items():
-                    dtype_info += f"  {col}: {dtype}\n"
-                
-                text_widget = scrolledtext.ScrolledText(error_frame, height=8, width=60)
-                text_widget.pack(pady=10, fill=tk.BOTH, expand=True)
-                text_widget.insert(tk.END, dtype_info)
-                text_widget.config(state=tk.DISABLED)
+            error_label = ttk.Label(
+                self.shap_frame, 
+                text=f"SHAP analysis error: {str(e)}",
+                justify=tk.LEFT
+            )
+            error_label.pack(pady=20)
+            print(f"SHAP error: {e}")
 
     def _with_readable_columns(self, X: pd.DataFrame) -> pd.DataFrame:
         """返回用于绘图的列名副本（可读名称）"""
@@ -724,6 +766,160 @@ class ModelEvaluationApp:
             
         except Exception as e:
             ttk.Label(self.preview_frame, text=f"Preview error: {str(e)}").pack(pady=20)
+    
+    def _create_shap_radar_chart(self, parent, shap_importance, feature_names, class_id, top_n=10):
+        """为单个类别创建SHAP重要性雷达图"""
+        try:
+            # 获取最重要的top_n个特征
+            top_indices = np.argsort(shap_importance)[-top_n:][::-1]
+            top_features = [feature_names[i] for i in top_indices]
+            top_importance = shap_importance[top_indices]
+            
+            # 归一化到0-1范围
+            max_val = np.max(top_importance)
+            if max_val > 0:
+                normalized_importance = top_importance / max_val
+            else:
+                normalized_importance = top_importance
+            
+            # 雷达图需要闭合（第一个和最后一个点相同）
+            values = np.concatenate([normalized_importance, [normalized_importance[0]]])
+            features = list(top_features) + [top_features[0]]
+            
+            # 创建雷达图
+            fig = Figure(figsize=(10, 8))                                           # 新
+            ax = fig.add_subplot(111, polar=True)
+            
+            # 计算角度
+            angles = np.linspace(0, 2 * np.pi, len(features), endpoint=True).tolist()
+            
+            # 绘制雷达图
+            ax.fill(angles, values, color='red', alpha=0.25)
+            ax.plot(angles, values, color='red', linewidth=2)
+            
+            # 设置特征标签
+            ax.set_xticks(angles[:-1])
+            feature_labels = self._map_feature_names(features[:-1])
+            ax.set_xticklabels(feature_labels, fontsize=9)
+            
+            # 设置标题和网格
+            ax.set_title(f'Top {top_n} Features - Class {class_id}\n(by mean |SHAP value|)', 
+                        fontsize=14, fontweight='bold', pad=20)
+            ax.grid(True)
+            
+            # 设置y轴标签
+            ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
+            ax.set_yticklabels(['0.2', '0.4', '0.6', '0.8', '1.0'], fontsize=8)
+            ax.set_ylim(0, 1.1)
+            
+            plt.tight_layout()
+            
+            # 嵌入到GUI
+            fig.tight_layout()
+            canvas = FigureCanvasTkAgg(fig, master=parent)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            self._mpl_refs.append(canvas)
+            
+            # 添加数值表格
+            table_frame = ttk.Frame(parent)
+            table_frame.pack(fill=tk.X, padx=10, pady=5)
+
+            top_n = min(top_n, len(feature_names))
+            
+            # 创建表格数据
+            table_data = []
+            for i, (feature, importance) in enumerate(zip(top_features, top_importance)):
+                display_name = self._map_feature_names([feature])[0]
+                table_data.append((i+1, display_name, f"{importance:.6f}"))
+            
+            # 创建表格
+            tree = ttk.Treeview(table_frame, columns=('Rank', 'Feature', 'Importance'), 
+                            show='headings', height=min(6, len(table_data)))
+            tree.heading('Rank', text='Rank')
+            tree.heading('Feature', text='Feature')
+            tree.heading('Importance', text='Mean |SHAP|')
+            tree.column('Rank', width=50, anchor='center')
+            tree.column('Feature', width=300)
+            tree.column('Importance', width=100, anchor='center')
+            
+            for row in table_data:
+                tree.insert('', 'end', values=row)
+            
+            scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=tree.yview)
+            tree.configure(yscrollcommand=scrollbar.set)
+            
+            tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+        except Exception as e:
+            ttk.Label(parent, text=f"Radar chart error: {str(e)}").pack(pady=20)
+
+    def _create_comparison_radar_chart(self, parent, shap_importance_dict, feature_names, class_ids, top_n=8):
+        """创建比较所有类别的雷达图"""
+        try:
+            # 获取所有类别共同的最重要特征
+            all_importances = np.stack(list(shap_importance_dict.values()))
+            mean_importance = np.mean(all_importances, axis=0)
+            top_indices = np.argsort(mean_importance)[-top_n:][::-1]
+            top_features = [feature_names[i] for i in top_indices]
+            
+            # 准备数据
+            categories = top_features
+            N = len(categories)
+            
+            # 计算角度
+            angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
+            angles += angles[:1]  # 闭合
+            
+            # 创建雷达图
+            fig = Figure(figsize=(12, 9))                                           # 新
+            ax = fig.add_subplot(111, polar=True)
+            
+            # 为每个类别绘制线
+            colors = plt.cm.Set3(np.linspace(0, 1, len(class_ids)))
+            for i, class_id in enumerate(class_ids):
+                importance = shap_importance_dict[class_id][top_indices]
+                max_val = np.max(importance)
+                if max_val > 0:
+                    normalized = importance / max_val
+                else:
+                    normalized = importance
+                
+                # 闭合数据
+                values = np.concatenate([normalized, [normalized[0]]])
+                
+                ax.plot(angles, values, linewidth=2, linestyle='solid', 
+                    label=f'Class {class_id}', color=colors[i])
+                ax.fill(angles, values, color=colors[i], alpha=0.1)
+            
+            # 设置特征标签
+            feature_labels = self._map_feature_names(categories)
+            ax.set_xticks(angles[:-1])
+            ax.set_xticklabels(feature_labels, fontsize=9)
+            
+            # 设置标题和图例
+            ax.set_title(f'Top {top_n} Features Comparison Across Classes\n(Normalized by class max)', 
+                        fontsize=14, fontweight='bold', pad=20)
+            ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.0))
+            
+            # 设置网格
+            ax.grid(True)
+            ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
+            ax.set_yticklabels(['0.2', '0.4', '0.6', '0.8', '1.0'], fontsize=8)
+            ax.set_ylim(0, 1.1)
+            
+            plt.tight_layout()
+            
+            # 嵌入到GUI
+            fig.tight_layout()
+            canvas = FigureCanvasTkAgg(fig, master=parent)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            self._mpl_refs.append(canvas)
+            
+        except Exception as e:
+            ttk.Label(parent, text=f"Comparison radar chart error: {str(e)}").pack(pady=20)
 
 def main():
     root = tk.Tk()
