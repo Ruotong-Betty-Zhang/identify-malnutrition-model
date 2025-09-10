@@ -17,6 +17,57 @@ from matplotlib.figure import Figure
 
 warnings.filterwarnings('ignore')
 
+class ScrollableFrame(ttk.Frame):
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.canvas = tk.Canvas(self, highlightthickness=0)
+        self.vbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.inner = ttk.Frame(self.canvas)
+
+        self.inner.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+        self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.vbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.vbar.pack(side="right", fill="y")
+
+        # 只在“悬停”时绑定滚轮；离开时解绑
+        for w in (self, self.canvas, self.inner):
+            w.bind("<Enter>", self._bind_mousewheel)
+            w.bind("<Leave>", self._unbind_mousewheel)
+
+    @property
+    def body(self):
+        return self.inner
+
+    # Windows / macOS: <MouseWheel>（macOS 的 delta 很小也适用）
+    def _on_mousewheel(self, event):
+        step = -1 if event.delta > 0 else 1
+        self.canvas.yview_scroll(step * 3, "units")  # 调整 3 控制速度
+
+    # Linux: Button-4/5
+    def _on_mousewheel_linux(self, event):
+        if event.num == 4:
+            self.canvas.yview_scroll(-3, "units")
+        elif event.num == 5:
+            self.canvas.yview_scroll(3, "units")
+
+    def _bind_mousewheel(self, _=None):
+        # 只在悬停本控件时把滚轮“接过来”
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-4>", self._on_mousewheel_linux)
+        self.canvas.bind_all("<Button-5>", self._on_mousewheel_linux)
+
+    def _unbind_mousewheel(self, _=None):
+        # 鼠标离开：释放滚轮，不影响别的页面/控件
+        self.canvas.unbind_all("<MouseWheel>")
+        self.canvas.unbind_all("<Button-4>")
+        self.canvas.unbind_all("<Button-5>")
+
+
 class ModelEvaluationApp:
     def __init__(self, root):
         self.root = root
@@ -537,6 +588,10 @@ class ModelEvaluationApp:
         for widget in self.shap_frame.winfo_children():
             widget.destroy()
         
+        scroll = ScrollableFrame(self.shap_frame)
+        scroll.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        parent_for_content = scroll.body
+
         try:
             # 使用您XGBoost代码中的数值化清洗方法
             def _sanitize(df: pd.DataFrame) -> pd.DataFrame:
@@ -623,7 +678,7 @@ class ModelEvaluationApp:
                     class_ids = list(range(len(sv_list)))
             
             # 创建主选项卡
-            notebook = ttk.Notebook(self.shap_frame)
+            notebook = ttk.Notebook(parent_for_content)
             notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
             # 计算每个类别的平均SHAP绝对值（特征重要性）
@@ -767,159 +822,148 @@ class ModelEvaluationApp:
         except Exception as e:
             ttk.Label(self.preview_frame, text=f"Preview error: {str(e)}").pack(pady=20)
     
-    def _create_shap_radar_chart(self, parent, shap_importance, feature_names, class_id, top_n=10):
-        """为单个类别创建SHAP重要性雷达图"""
+    def _create_shap_radar_chart(self, parent, shap_importance, feature_names, class_id, top_n=12):
+        """为单个类别创建 SHAP 重要性雷达图（绝对值刻度，不做归一化）"""
         try:
-            # 获取最重要的top_n个特征
+            # 1) 取该类 Top-N 特征（按 mean|SHAP| 排序）
+            top_n = min(top_n, len(feature_names))
             top_indices = np.argsort(shap_importance)[-top_n:][::-1]
             top_features = [feature_names[i] for i in top_indices]
-            top_importance = shap_importance[top_indices]
-            
-            # 归一化到0-1范围
-            max_val = np.max(top_importance)
-            if max_val > 0:
-                normalized_importance = top_importance / max_val
-            else:
-                normalized_importance = top_importance
-            
-            # 雷达图需要闭合（第一个和最后一个点相同）
-            values = np.concatenate([normalized_importance, [normalized_importance[0]]])
-            features = list(top_features) + [top_features[0]]
-            
-            # 创建雷达图
-            fig = Figure(figsize=(10, 8))                                           # 新
+            top_importance = shap_importance[top_indices]  # 真实 mean|SHAP| 值
+
+            # 2) 极坐标角度（闭合多边形）
+            N = len(top_features)
+            angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
+            angles += angles[:1]  # 闭合
+
+            # 3) 准备值并闭合
+            values = np.concatenate([top_importance, [top_importance[0]]])
+
+            # 4) 画图（不归一化，使用绝对刻度）
+            fig = Figure(figsize=(10, 8))
             ax = fig.add_subplot(111, polar=True)
-            
-            # 计算角度
-            angles = np.linspace(0, 2 * np.pi, len(features), endpoint=True).tolist()
-            
-            # 绘制雷达图
-            ax.fill(angles, values, color='red', alpha=0.25)
             ax.plot(angles, values, color='red', linewidth=2)
-            
-            # 设置特征标签
+            ax.fill(angles, values, color='red', alpha=0.25)
+
+            # 5) 轴与标注
+            feature_labels = self._map_feature_names(top_features)
             ax.set_xticks(angles[:-1])
-            feature_labels = self._map_feature_names(features[:-1])
             ax.set_xticklabels(feature_labels, fontsize=9)
-            
-            # 设置标题和网格
-            ax.set_title(f'Top {top_n} Features - Class {class_id}\n(by mean |SHAP value|)', 
+
+            ymax = float(top_importance.max()) if top_importance.size else 1.0
+            if ymax <= 0:
+                ymax = 1.0
+            ax.set_ylim(0, ymax * 1.05)
+            yticks = np.linspace(0, ymax, 5)
+            ax.set_yticks(yticks)
+            ax.set_yticklabels([f"{v:.3g}" for v in yticks], fontsize=8)  # 显示真实 SHAP 数值
+
+            ax.set_title(f"Top {top_n} Features - Class {class_id}\n(by absolute mean |SHAP|)",
                         fontsize=14, fontweight='bold', pad=20)
             ax.grid(True)
-            
-            # 设置y轴标签
-            ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
-            ax.set_yticklabels(['0.2', '0.4', '0.6', '0.8', '1.0'], fontsize=8)
-            ax.set_ylim(0, 1.1)
-            
-            plt.tight_layout()
-            
-            # 嵌入到GUI
+
             fig.tight_layout()
             canvas = FigureCanvasTkAgg(fig, master=parent)
             canvas.draw()
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
             self._mpl_refs.append(canvas)
-            
-            # 添加数值表格
+
+            # 6) 下方表格：同步显示 Top-N 的真实 mean|SHAP|
             table_frame = ttk.Frame(parent)
             table_frame.pack(fill=tk.X, padx=10, pady=5)
 
-            top_n = min(top_n, len(feature_names))
-            
-            # 创建表格数据
             table_data = []
-            for i, (feature, importance) in enumerate(zip(top_features, top_importance)):
+            for i, (feature, importance) in enumerate(zip(top_features, top_importance), start=1):
                 display_name = self._map_feature_names([feature])[0]
-                table_data.append((i+1, display_name, f"{importance:.6f}"))
-            
-            # 创建表格
-            tree = ttk.Treeview(table_frame, columns=('Rank', 'Feature', 'Importance'), 
-                            show='headings', height=min(6, len(table_data)))
+                table_data.append((i, display_name, f"{importance:.6f}"))
+
+            tree = ttk.Treeview(table_frame, columns=('Rank', 'Feature', 'Importance'),
+                                show='headings', height=min(6, len(table_data)))
             tree.heading('Rank', text='Rank')
             tree.heading('Feature', text='Feature')
             tree.heading('Importance', text='Mean |SHAP|')
             tree.column('Rank', width=50, anchor='center')
             tree.column('Feature', width=300)
             tree.column('Importance', width=100, anchor='center')
-            
+
             for row in table_data:
                 tree.insert('', 'end', values=row)
-            
+
             scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=tree.yview)
             tree.configure(yscrollcommand=scrollbar.set)
-            
             tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-            
+
         except Exception as e:
             ttk.Label(parent, text=f"Radar chart error: {str(e)}").pack(pady=20)
 
-    def _create_comparison_radar_chart(self, parent, shap_importance_dict, feature_names, class_ids, top_n=8):
-        """创建比较所有类别的雷达图"""
+
+    def _create_comparison_radar_chart(self, parent, shap_importance_dict, feature_names, class_ids, top_n=12):
+        """比较各类别的 mean|SHAP|：使用统一的绝对刻度（不做归一化），保证绝对量级可比"""
         try:
-            # 获取所有类别共同的最重要特征
-            all_importances = np.stack(list(shap_importance_dict.values()))
-            mean_importance = np.mean(all_importances, axis=0)
-            top_indices = np.argsort(mean_importance)[-top_n:][::-1]
+            # 1) 选择用于比较的特征索引：优先用模型FI，否则用跨类 mean|SHAP|
+            if self.feature_importances is not None:
+                if isinstance(self.feature_importances, dict):
+                    fi_vec = np.array([self.feature_importances.get(str(f), 0.0) for f in feature_names], dtype=float)
+                else:
+                    fi_vec = np.asarray(self.feature_importances, dtype=float)
+                    if fi_vec.shape[0] != len(feature_names):
+                        fi_vec = np.resize(fi_vec, len(feature_names))
+                top_indices = np.argsort(fi_vec)[-top_n:][::-1]
+            else:
+                all_importances_for_pick = np.stack(list(shap_importance_dict.values()))  # (n_classes, n_features)
+                mean_importance = np.mean(all_importances_for_pick, axis=0)
+                top_indices = np.argsort(mean_importance)[-top_n:][::-1]
+
             top_features = [feature_names[i] for i in top_indices]
-            
-            # 准备数据
-            categories = top_features
-            N = len(categories)
-            
-            # 计算角度
+            N = len(top_features)
+
+            # 2) 极坐标角度（闭合）
             angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
-            angles += angles[:1]  # 闭合
-            
-            # 创建雷达图
-            fig = Figure(figsize=(12, 9))                                           # 新
+            angles += angles[:1]
+
+            # 3) 统一绝对刻度：在所有“类别 × 选中Top-N特征”上求全局最大
+            all_importances = np.stack([shap_importance_dict[c] for c in class_ids])  # (n_classes, n_features)
+            global_max = float(np.max(all_importances[:, top_indices])) if top_indices is not None else float(np.max(all_importances))
+            if global_max <= 0:
+                global_max = 1.0  # 防止全0导致除0/空图
+
+            # 4) 画图（不做任何归一化！）
+            fig = Figure(figsize=(12, 9))
             ax = fig.add_subplot(111, polar=True)
-            
-            # 为每个类别绘制线
+
             colors = plt.cm.Set3(np.linspace(0, 1, len(class_ids)))
             for i, class_id in enumerate(class_ids):
-                importance = shap_importance_dict[class_id][top_indices]
-                max_val = np.max(importance)
-                if max_val > 0:
-                    normalized = importance / max_val
-                else:
-                    normalized = importance
-                
-                # 闭合数据
-                values = np.concatenate([normalized, [normalized[0]]])
-                
-                ax.plot(angles, values, linewidth=2, linestyle='solid', 
-                    label=f'Class {class_id}', color=colors[i])
-                ax.fill(angles, values, color=colors[i], alpha=0.1)
-            
-            # 设置特征标签
-            feature_labels = self._map_feature_names(categories)
+                importance = shap_importance_dict[class_id][top_indices]      # 真实 mean|SHAP|（绝对值）
+                values = np.concatenate([importance, [importance[0]]])        # 闭合
+                ax.plot(angles, values, linewidth=2, linestyle='solid', label=f'Class {class_id}', color=colors[i])
+                ax.fill(angles, values, color=colors[i], alpha=0.10)
+
+            # 5) 轴与标注（同一绝对刻度）
+            feature_labels = self._map_feature_names(top_features)
             ax.set_xticks(angles[:-1])
             ax.set_xticklabels(feature_labels, fontsize=9)
-            
-            # 设置标题和图例
-            ax.set_title(f'Top {top_n} Features Comparison Across Classes\n(Normalized by class max)', 
+
+            # y 轴用全局最大值设上限，确保不同类别可比
+            ax.set_ylim(0, global_max * 1.05)
+            yticks = np.linspace(0, global_max, 5)  # 0, 25%, 50%, 75%, 100% 的“绝对数值”刻度
+            ax.set_yticks(yticks)
+            ax.set_yticklabels([f"{v:.3g}" for v in yticks], fontsize=8)  # 直显示真实 SHAP 数值（非百分比）
+
+            ax.set_title(f"Top {top_n} Features Comparison Across Classes\n(Absolute mean |SHAP|, same scale)", 
                         fontsize=14, fontweight='bold', pad=20)
             ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.0))
-            
-            # 设置网格
             ax.grid(True)
-            ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
-            ax.set_yticklabels(['0.2', '0.4', '0.6', '0.8', '1.0'], fontsize=8)
-            ax.set_ylim(0, 1.1)
-            
-            plt.tight_layout()
-            
-            # 嵌入到GUI
+
             fig.tight_layout()
             canvas = FigureCanvasTkAgg(fig, master=parent)
             canvas.draw()
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
             self._mpl_refs.append(canvas)
-            
+
         except Exception as e:
             ttk.Label(parent, text=f"Comparison radar chart error: {str(e)}").pack(pady=20)
+
 
 def main():
     root = tk.Tk()
