@@ -722,6 +722,12 @@ class ModelComparisonApp:
                 'preprocess_info': prep_info,
             }
 
+            # 计算并缓存用于对比页的 SHAP 摘要（按类的 mean|SHAP|）
+            shap_stats = self._compute_shap_summary(model, X_test, y_test)
+            self.results[side]['shap_by_class'] = shap_stats["by_class"]
+            self.results[side]['shap_feature_names'] = shap_stats["feature_names"]
+
+
             # 渲染到对应面板
             panel = self.panelA if side=='A' else self.panelB
             self.root.after(0, lambda: panel.render_accuracy(acc, prep_info))
@@ -833,16 +839,43 @@ class ModelComparisonApp:
         txtB.insert(tk.END, b.get('report', 'N/A'))
         txtB.config(state=tk.DISABLED)
 
-        # ========== 5) SHAP Top-N Comparison 页 ==========
+        # ========== 5) SHAP Top-N Comparison 页（改为两个模型各自的“类型对比雷达图”） ==========
         for w in self.cmp_shap_container.winfo_children():
             w.destroy()
-        # 简洁处理：提示去各自 SHAP 页查看细节；如需，我可以把“跨模型同特征 Top-N 雷达叠加”也放到这里
-        ttk.Label(
-            self.cmp_shap_container,
-            text=("Use each model's SHAP tabs for detailed per-class plots.\n"
-                "This page summarizes top features via each model's FI as a quick proxy."),
-            justify=tk.LEFT
-        ).pack(pady=6)
+
+        a = self.results.get('A', {})
+        b = self.results.get('B', {})
+
+        # 容器布局：左右两列分别放 A / B 的类型雷达，最上面有标题
+        ttk.Label(self.cmp_shap_container, text='Class Comparison Radar (Top-N by global mean |SHAP|)', font=('Arial', 14, 'bold')).pack(pady=6)
+        wrap = ttk.Frame(self.cmp_shap_container)
+        wrap.pack(fill=tk.BOTH, expand=True)
+
+        left = ttk.Frame(wrap); left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
+        right = ttk.Frame(wrap); right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
+
+        # A
+        if a.get('shap_by_class') and a.get('shap_feature_names') is not None:
+            self._plot_class_comparison_radar(
+                left,
+                a['shap_by_class'],
+                a['shap_feature_names'],
+                title='Model A'
+            )
+        else:
+            ttk.Label(left, text='Model A: SHAP summary not available').pack(pady=12)
+
+        # B
+        if b.get('shap_by_class') and b.get('shap_feature_names') is not None:
+            self._plot_class_comparison_radar(
+                right,
+                b['shap_by_class'],
+                b['shap_feature_names'],
+                title='Model B'
+            )
+        else:
+            ttk.Label(right, text='Model B: SHAP summary not available').pack(pady=12)
+
 
         self.status_var.set('Comparison refreshed')
 
@@ -929,6 +962,162 @@ class ModelComparisonApp:
             info['details'] = 'No model feature names available, using original features\n'
             info['aligned'] = True
         return X_aligned, info
+    
+        # ---------- 计算 SHAP 摘要：按类别的 mean|SHAP| ----------
+    def _compute_shap_summary(self, model, X_test: pd.DataFrame, y_test: pd.Series):
+        """
+        返回:
+            {
+                "feature_names": pd.Index([...]),
+                "by_class": { class_id: np.ndarray[feat_dim], ... }   # 每个类别的 mean(|SHAP|)
+            }
+        说明：
+            - 二分类时，使用“正类”的 SHAP（与常见解释一致），key 形如 "pos=<label>"。
+            - 多分类时，key 为类别标识（model.classes_ 或 y_test 的去重值）。
+        """
+        # —— 与 ResultPanel 中一致的数值化步骤（简化封装） ——
+        def _sanitize(df: pd.DataFrame) -> pd.DataFrame:
+            out = df.copy()
+            out = out.replace({None: np.nan}).replace([np.inf, -np.inf], np.nan)
+            for c in out.columns:
+                s = out[c]
+                if s.dtype == bool:
+                    out[c] = s.astype(np.int8); continue
+                if pd.api.types.is_categorical_dtype(s):
+                    out[c] = s.cat.add_categories(["__NA__"]).fillna("__NA__").cat.codes.astype(np.int32); continue
+                if s.dtype == object or pd.api.types.is_object_dtype(s):
+                    num = pd.to_numeric(s, errors="coerce")
+                    if num.notna().mean() >= 0.6:
+                        out[c] = num
+                    else:
+                        codes, _ = pd.factorize(s.astype(str), sort=False)
+                        out[c] = codes.astype(np.int32)
+            return out.astype(np.float32)
+
+        X_num = _sanitize(X_test)
+        if not isinstance(X_num, pd.DataFrame):
+            X_num = pd.DataFrame(X_num, columns=[f"Feature_{i}" for i in range(X_num.shape[1])])
+
+        # —— 计算 SHAP 值（优先 TreeExplainer，失败则 LinearExplainer） ——
+        try:
+            explainer = shap.TreeExplainer(model, model_output="raw")
+            sv = explainer.shap_values(X_num)
+        except Exception:
+            explainer = shap.LinearExplainer(model, X_num, feature_dependence="independent")
+            sv = explainer.shap_values(X_num)
+
+        def _split_sv_to_list(sv_val, n_classes_hint=None):
+            if isinstance(sv_val, list):
+                return sv_val
+            arr = np.asarray(sv_val)
+            if arr.ndim == 2:
+                return [arr]  # 单输出
+            if arr.ndim == 3:
+                if n_classes_hint is None:
+                    n_classes_hint = len(getattr(model, "classes_", [])) or len(np.unique(y_test))
+                for axis, size in enumerate(arr.shape):
+                    if n_classes_hint and size == n_classes_hint:
+                        return [np.take(arr, i, axis=axis) for i in range(size)]
+                if arr.shape[-1] <= 10:
+                    return [arr[..., i] for i in range(arr.shape[-1])]
+                if arr.shape[1] <= 10:
+                    return [arr[:, i, :] for i in range(arr.shape[1])]
+                return [arr[i] for i in range(arr.shape[0])]
+            raise ValueError(f"Unexpected SHAP shape: {arr.shape}")
+
+        n_classes_hint = len(getattr(model, "classes_", [])) or len(np.unique(y_test))
+        sv_list = _split_sv_to_list(sv, n_classes_hint=n_classes_hint)
+
+        model_classes = getattr(model, "classes_", None)
+        if isinstance(model_classes, (list, np.ndarray)):
+            model_classes = list(model_classes)
+        uniq_y = list(np.unique(y_test))
+
+        shap_by_class = {}
+
+        # —— 二分类：使用“正类”的 SHAP，作为整模的类型雷达 —— 
+        if (model_classes and len(model_classes) == 2) or (not model_classes and len(uniq_y) == 2):
+            if model_classes and len(model_classes) == 2:
+                neg_label, pos_label = model_classes[0], model_classes[1]
+            else:
+                neg_label, pos_label = sorted(uniq_y)[0], sorted(uniq_y)[1]
+
+            if len(sv_list) == 1:
+                sv_pos = np.asarray(sv_list[0])
+            else:
+                idx_pos = 1 if len(sv_list) > 1 else 0
+                sv_pos = np.asarray(sv_list[idx_pos])
+
+            if sv_pos.ndim != 2:
+                sv_pos = sv_pos.reshape(sv_pos.shape[0], -1)
+
+            mean_abs = np.mean(np.abs(sv_pos), axis=0)
+            shap_by_class[f"pos={pos_label}"] = mean_abs
+            return {"feature_names": X_num.columns, "by_class": shap_by_class}
+
+        # —— 多分类：每个类别一条 mean|SHAP| ----
+        if model_classes and len(model_classes) == len(sv_list):
+            class_ids = model_classes
+        else:
+            class_ids = uniq_y if len(uniq_y) == len(sv_list) else list(range(len(sv_list)))
+
+        for ci, sv_c in enumerate(sv_list):
+            mean_abs = np.mean(np.abs(sv_c), axis=0)
+            shap_by_class[class_ids[ci]] = mean_abs
+
+        return {"feature_names": X_num.columns, "by_class": shap_by_class}
+
+    # ---------- 绘制“类型（按类）对比”雷达图（一个模型内多类叠加） ----------
+    def _plot_class_comparison_radar(self, parent, shap_by_class: dict, feature_names, title: str, top_n: int = 12):
+        """
+        在 parent 内绘制：选取全类平均的 Top-N 特征，按“全局最大 mean|SHAP|”归一化后，
+        将各类别在同一雷达图上叠加，直观展示“类型差异”。
+        """
+        try:
+            class_ids = list(shap_by_class.keys())
+            if len(class_ids) == 0:
+                ttk.Label(parent, text='No SHAP summary available').pack(pady=10); return
+
+            all_importances = np.stack([shap_by_class[c] for c in class_ids])
+            mean_importance = np.mean(all_importances, axis=0)
+            top_indices = np.argsort(mean_importance)[-top_n:][::-1]
+            top_features = [feature_names[i] for i in top_indices]
+
+            global_max = float(np.max(all_importances[:, top_indices]))
+            if global_max <= 0: global_max = 1.0
+
+            N = len(top_features)
+            angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
+            angles += angles[:1]
+
+            fig = Figure(figsize=(6, 6))
+            ax = fig.add_subplot(111, polar=True)
+            fig.subplots_adjust(top=0.86, bottom=0.20, left=0.06, right=0.95)
+
+            colors = plt.cm.Set3(np.linspace(0, 1, len(class_ids)))
+            for i, cid in enumerate(class_ids):
+                importance = shap_by_class[cid][top_indices] / global_max
+                values = np.concatenate([importance, [importance[0]]])
+                ax.plot(angles, values, linewidth=2, linestyle='solid', label=f'Class {cid}', color=colors[i])
+                ax.fill(angles, values, color=colors[i], alpha=0.10)
+
+            import textwrap
+            feature_labels = ['\n'.join(textwrap.wrap(str(f), width=16)) for f in top_features]
+            ax.set_xticks(angles[:-1]); ax.set_xticklabels(feature_labels, fontsize=9)
+
+            ax.set_ylim(0, 1.05)
+            yticks = np.linspace(0, 1.0, 5)
+            ax.set_yticks(yticks); ax.set_yticklabels([f"{v:.2f}" for v in yticks], fontsize=8)
+
+            ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+            ax.legend(loc='upper right', bbox_to_anchor=(1.28, 1.02))
+            ax.grid(True)
+
+            canvas = FigureCanvasTkAgg(fig, master=parent)
+            canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        except Exception as e:
+            ttk.Label(parent, text=f"SHAP radar error: {str(e)}").pack(pady=12)
+
 
 
 # ------------------------------
