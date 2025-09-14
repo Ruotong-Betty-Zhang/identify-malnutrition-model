@@ -302,30 +302,51 @@ class ResultPanel:
             top_indices = np.argsort(shap_importance)[-top_n:][::-1]
             top_features = [feature_names[i] for i in top_indices]
             top_importance = shap_importance[top_indices]
+
+            # ---- 关键：把半径标准化到 0~1，显示更稳 ----
+            denom = float(top_importance.max()) if top_importance.size else 1.0
+            if denom <= 0: denom = 1.0
+            plot_vals = top_importance / denom
+
             N = len(top_features)
             angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist(); angles += angles[:1]
-            values = np.concatenate([top_importance, [top_importance[0]]])
+            values = np.concatenate([plot_vals, [plot_vals[0]]])
 
-            fig = Figure(figsize=(10, 8)); ax = fig.add_subplot(111, polar=True)
+            fig = Figure(figsize=(10, 8))
+            ax = fig.add_subplot(111, polar=True)
+
+            # 画线
             ax.plot(angles, values, linewidth=2)
             ax.fill(angles, values, alpha=0.25)
-            feature_labels = self._map_feature_names(top_features)
+
+            # ---- 关键：给子图更大的边距，避免裁切 ----
+            fig.subplots_adjust(top=0.86, bottom=0.20, left=0.08, right=0.95)
+
+            # 标签自动换行，避免过长溢出
+            import textwrap
+            feature_labels = ['\n'.join(textwrap.wrap(str(f), width=16)) for f in top_features]
             ax.set_xticks(angles[:-1]); ax.set_xticklabels(feature_labels, fontsize=9)
-            ymax = float(top_importance.max()) if top_importance.size else 1.0
-            if ymax <= 0: ymax = 1.0
-            ax.set_ylim(0, ymax * 1.05)
-            yticks = np.linspace(0, ymax, 5)
-            ax.set_yticks(yticks); ax.set_yticklabels([f"{v:.3g}" for v in yticks], fontsize=8)
-            ax.set_title(f"Top {top_n} Features - Class {class_id}", fontsize=14, fontweight='bold', pad=20)
+
+            # ---- 关键：半径固定到 1.05（标准化之后） ----
+            ax.set_ylim(0, 1.05)
+            yticks = np.linspace(0, 1.0, 5)
+            ax.set_yticks(yticks); ax.set_yticklabels([f"{v:.2f}" for v in yticks], fontsize=8)
+
+            ax.set_title(f"Top {top_n} Features - Class {class_id} (scaled by max |SHAP|= {denom:.3g})",
+                        fontsize=14, fontweight='bold', pad=20)
             ax.grid(True)
-            canvas = FigureCanvasTkAgg(fig, master=parent); canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+            canvas = FigureCanvasTkAgg(fig, master=parent)
+            canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
             self._mpl_refs.append(canvas)
 
-            # 表格
+            # 表格（保留原始数值）
             table_frame = ttk.Frame(parent); table_frame.pack(fill=tk.X, padx=10, pady=5)
-            tree = ttk.Treeview(table_frame, columns=('Rank','Feature','Mean|SHAP|'), show='headings', height=min(6, len(top_features)))
+            tree = ttk.Treeview(table_frame, columns=('Rank','Feature','Mean|SHAP|'), show='headings',
+                                height=min(6, len(top_features)))
             tree.heading('Rank', text='Rank'); tree.heading('Feature', text='Feature'); tree.heading('Mean|SHAP|', text='Mean |SHAP|')
-            tree.column('Rank', width=50, anchor='center'); tree.column('Feature', width=300); tree.column('Mean|SHAP|', width=120, anchor='center')
+            tree.column('Rank', width=50, anchor='center'); tree.column('Feature', width=300)
+            tree.column('Mean|SHAP|', width=120, anchor='center')
             for i,(f,imp) in enumerate(zip(top_features, top_importance), start=1):
                 tree.insert('', 'end', values=(i, f, f"{imp:.6f}"))
             sb = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=tree.yview)
@@ -334,35 +355,50 @@ class ResultPanel:
         except Exception as e:
             ttk.Label(parent, text=f"Radar chart error: {str(e)}").pack(pady=20)
 
+
     def _create_comparison_radar_chart(self, parent, shap_importance_dict, feature_names, class_ids, top_n=12):
         try:
             all_importances = np.stack([shap_importance_dict[c] for c in class_ids])
             mean_importance = np.mean(all_importances, axis=0)
             top_indices = np.argsort(mean_importance)[-top_n:][::-1]
             top_features = [feature_names[i] for i in top_indices]
-            N = len(top_features)
-            angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist(); angles += angles[:1]
+
+            # ---- 关键：用全类中的全局最大值做标准化 ----
             global_max = float(np.max(all_importances[:, top_indices]))
             if global_max <= 0: global_max = 1.0
-            fig = Figure(figsize=(12, 9)); ax = fig.add_subplot(111, polar=True)
+
+            N = len(top_features)
+            angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist(); angles += angles[:1]
+
+            fig = Figure(figsize=(12, 9))
+            ax = fig.add_subplot(111, polar=True)
+            fig.subplots_adjust(top=0.86, bottom=0.20, left=0.06, right=0.95)
+
             colors = plt.cm.Set3(np.linspace(0, 1, len(class_ids)))
             for i, cid in enumerate(class_ids):
-                importance = shap_importance_dict[cid][top_indices]
+                importance = shap_importance_dict[cid][top_indices] / global_max
                 values = np.concatenate([importance, [importance[0]]])
                 ax.plot(angles, values, linewidth=2, linestyle='solid', label=f'Class {cid}', color=colors[i])
                 ax.fill(angles, values, color=colors[i], alpha=0.10)
-            feature_labels = top_features
+
+            import textwrap
+            feature_labels = ['\n'.join(textwrap.wrap(str(f), width=16)) for f in top_features]
             ax.set_xticks(angles[:-1]); ax.set_xticklabels(feature_labels, fontsize=9)
-            ax.set_ylim(0, global_max * 1.05)
-            yticks = np.linspace(0, global_max, 5)
-            ax.set_yticks(yticks); ax.set_yticklabels([f"{v:.3g}" for v in yticks], fontsize=8)
-            ax.set_title(f"Top {top_n} Features Comparison Across Classes", fontsize=14, fontweight='bold', pad=20)
-            ax.legend(loc='upper right', bbox_to_anchor=(1.3,1.0)); ax.grid(True)
-            canvas = FigureCanvasTkAgg(fig, master=parent); canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+            ax.set_ylim(0, 1.05)
+            yticks = np.linspace(0, 1.0, 5)
+            ax.set_yticks(yticks); ax.set_yticklabels([f"{v:.2f}" for v in yticks], fontsize=8)
+
+            ax.set_title(f"Top {top_n} Features Comparison Across Classes (scaled by global max |SHAP|={global_max:.3g})",
+                        fontsize=14, fontweight='bold', pad=20)
+            ax.legend(loc='upper right', bbox_to_anchor=(1.28, 1.02))
+            ax.grid(True)
+
+            canvas = FigureCanvasTkAgg(fig, master=parent)
+            canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
             self._mpl_refs.append(canvas)
         except Exception as e:
             ttk.Label(parent, text=f"Comparison radar chart error: {str(e)}").pack(pady=20)
-
 
 # ------------------------------
 # 主应用：支持 A / B 两套数据+模型，并提供对比页
