@@ -8,6 +8,7 @@ import locale
 from utils import calculate_age, drop_columns, combine_malnutrition_labels, calculate_malnutrition, generate_gender_column_and_carelevel, calculate_feature_changes, knn_impute_missing_values,restore_integer_columns, smote_augment
 from dotenv import load_dotenv
 import os
+import ctypes
 
 # Use password in .env
 load_dotenv(dotenv_path=".env", override=True)
@@ -58,8 +59,12 @@ cap_2.to_pickle(os.path.join(dataset_folder, 'CAP_2.pkl'))
 cap_long = calculate_feature_changes(cap_1)
 cap_long.to_pickle(os.path.join(dataset_folder, 'CAP_L.pkl'))
 
-cap_2_aug = smote_augment(cap_2, 'Malnutrition')
+cap_2_aug = smote_augment(cap_2, 'CAP_Nutrition')
 cap_2_aug.to_pickle(os.path.join(dataset_folder, 'CAP_2_AUG.pkl'))
+
+cap_b = cap_2[['iG2g', 'Scale_PressureUlcerRisk', 'RUG_ADLScore', 'iG4', 'Scale_CHESS', 'iD1', 'iF5f', 'iJ7', 'iC2b', 'iS2a', 'Malnutrition', 'CAP_Nutrition', 'IDno']]
+cap_b_aug = smote_augment(cap_b, 'CAP_Nutrition')
+cap_b_aug.to_pickle(os.path.join(dataset_folder, 'CAP_B_AUG.pkl'))
 
 # Generate mal df
 mal_1 = calculate_malnutrition(df)
@@ -77,3 +82,8 @@ mal_long.to_pickle(os.path.join(dataset_folder, 'MAL_L.pkl'))
 # Augment the data
 mal_2_aug = smote_augment(mal_2, 'Malnutrition')
 mal_2_aug.to_pickle(os.path.join(dataset_folder, 'MAL_2_AUG.pkl'))
+
+mal_b = mal_2[['iG2g', 'Scale_PressureUlcerRisk', 'RUG_ADLScore', 'iG4', 'Scale_CHESS', 'iD1', 'iF5f', 'iJ7', 'iC2b', 'iS2a', 'Malnutrition', 'IDno']]
+mal_b_aug = smote_augment(mal_b, 'Malnutrition')
+mal_b_aug.to_pickle(os.path.join(dataset_folder, 'MAL_B_AUG.pkl'))
+ctypes.windll.user32.MessageBoxW(0, "程序执行完成！", "提示", 0x40)

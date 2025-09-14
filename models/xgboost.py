@@ -154,7 +154,7 @@ class XGBoostModelTrainer:
 
         # 获取 top 12 特征的索引和数值
         indices = np.argsort(importances_pct)[::-1]
-        top_n = 12
+        top_n = 10
         top_indices = indices[:top_n]
         top_features = X_train.columns[top_indices]
         top_importances = importances_pct[top_indices]

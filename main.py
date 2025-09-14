@@ -3,6 +3,7 @@ import models.xgboost as xgb
 import os
 from dotenv import load_dotenv
 import pandas as pd
+import ctypes
 
 # Load environment variables
 load_dotenv(dotenv_path=".env", override=True)
@@ -137,10 +138,30 @@ xgb_model = xgb.XGBoostModelTrainer(seed=42)
 # xgb_model.train(os.path.join(dataset_folder, 'MAL_2_TVAE.pkl'), model_output, test_on_original=True)
 
 
-xgb_model.train(os.path.join(dataset_folder, 'MAL_2_AUG.pkl'), model_output, test_on_original=True, parameters={
+# xgb_model.train(os.path.join(dataset_folder, 'MAL_2_AUG.pkl'), model_output, test_on_original=True, parameters={
+#     "colsample_bytree": [0.6],
+#     "learning_rate": [0.1],
+#     "max_depth": [5],
+#     "n_estimators": [200],
+#     "subsample": [0.6]
+# })
+
+# Best parameters found: {'colsample_bytree': 0.8, 'learning_rate': 0.1, 'max_depth': 10, 'n_estimators': 200, 'subsample': 0.8}
+# xgb_model.train(os.path.join(dataset_folder, 'CAP_B_AUG.pkl'), model_output, test_on_original=True, parameters={
+#     "colsample_bytree": [0.8],
+#     "learning_rate": [0.1],
+#     "max_depth": [10],
+#     "n_estimators": [200],
+#     "subsample": [0.8]
+# })
+
+# Best parameters found: {'colsample_bytree': 0.6, 'learning_rate': 0.1, 'max_depth': 10, 'n_estimators': 200, 'subsample': 1}
+xgb_model.train(os.path.join(dataset_folder, 'MAL_B_AUG.pkl'), model_output, test_on_original=True, parameters={
     "colsample_bytree": [0.6],
     "learning_rate": [0.1],
-    "max_depth": [5],
+    "max_depth": [10],
     "n_estimators": [200],
-    "subsample": [0.6]
+    "subsample": [1]
 })
+
+ctypes.windll.user32.MessageBoxW(0, "程序执行完成！", "提示", 0x40)
