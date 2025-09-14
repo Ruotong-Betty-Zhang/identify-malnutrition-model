@@ -198,6 +198,7 @@ class ResultPanel:
         self.clear_tab(self.tab_shap)
         scroll = ScrollableFrame(self.tab_shap); scroll.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         parent = scroll.body
+
         try:
             def _sanitize(df: pd.DataFrame) -> pd.DataFrame:
                 out = df.copy()
@@ -232,7 +233,7 @@ class ResultPanel:
                 if isinstance(sv_val, list):
                     return sv_val
                 arr = np.asarray(sv_val)
-                if arr.ndim == 2:
+                if arr.ndim == 2:   
                     return [arr]
                 if arr.ndim == 3:
                     if n_classes_hint is None:
@@ -251,41 +252,107 @@ class ResultPanel:
             sv_list = _split_sv_to_list(sv, n_classes_hint=n_classes_hint)
 
             model_classes = getattr(model, "classes_", None)
-            if isinstance(model_classes, (list, np.ndarray)) and len(model_classes) == len(sv_list):
-                class_ids = list(model_classes)
+            if isinstance(model_classes, (list, np.ndarray)):
+                model_classes = list(model_classes)
+            uniq_y = list(np.unique(y_test))
+
+            # ========== 二分类：只显示一个页签（针对正类的 SHAP） ==========
+            if (model_classes and len(model_classes) == 2) or (not model_classes and len(uniq_y) == 2):
+                # 判定正负类标签
+                if model_classes and len(model_classes) == 2:
+                    neg_label, pos_label = model_classes[0], model_classes[1]
+                else:
+                    # 没有 classes_，用 y_test 的排序后较大值当正类
+                    neg_label, pos_label = sorted(uniq_y)[0], sorted(uniq_y)[1]
+
+                # 取“正类”的 SHAP 值
+                if len(sv_list) == 1:
+                    sv_pos = np.asarray(sv_list[0])  # 常见：只返回正类
+                else:
+                    # 存在两组时，按 classes 顺序取第二组，否则取 index=1 兜底
+                    idx_pos = 1 if len(sv_list) > 1 else 0
+                    sv_pos = np.asarray(sv_list[idx_pos])
+
+                if sv_pos.ndim != 2:
+                    sv_pos = sv_pos.reshape(sv_pos.shape[0], -1)
+
+                # 均值 |SHAP| 供雷达使用
+                mean_abs = np.mean(np.abs(sv_pos), axis=0)
+
+                # --- 单页签 ---
+                notebook = ttk.Notebook(parent); notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+                class_frame = ttk.Frame(notebook)
+                notebook.add(class_frame, text=f"Binary SHAP (pos={pos_label}, neg={neg_label})")
+
+                class_nb = ttk.Notebook(class_frame); class_nb.pack(fill=tk.BOTH, expand=True)
+
+                # 1) Beeswarm（全样本，不再按类过滤）
+                beeswarm_frame = ttk.Frame(class_nb); class_nb.add(beeswarm_frame, text="Beeswarm Plot")
+                fig_beeswarm = plt.figure(figsize=(12, 8))
+                shap.summary_plot(sv_pos, X_num, plot_type="dot", max_display=12, show=False)
+                fig_beeswarm.tight_layout()
+                canvas = FigureCanvasTkAgg(fig_beeswarm, master=beeswarm_frame)
+                canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                self._mpl_refs.append(canvas)
+                plt.close(fig_beeswarm)
+
+                # 2) 雷达图（标题里直接写正类）
+                radar_frame = ttk.Frame(class_nb); class_nb.add(radar_frame, text="Radar Chart")
+                self._create_shap_radar_chart(
+                    radar_frame,
+                    mean_abs,
+                    X_num.columns,
+                    class_id=f"pos={pos_label}"
+                )
+                return  # 二分类到此结束
+
+            # ========== 多分类：保留原来的“每类一个页签 + 对比” ==========
+            notebook = ttk.Notebook(parent); notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+            # 计算各类 mean|SHAP|
+            shap_importance_by_class = {}
+            # 确定 class_ids
+            if model_classes and len(model_classes) == len(sv_list):
+                class_ids = model_classes
             else:
-                test_classes = list(np.unique(y_test))
-                if len(test_classes) == len(sv_list):
-                    class_ids = test_classes
+                if len(uniq_y) == len(sv_list):
+                    class_ids = uniq_y
                 else:
                     class_ids = list(range(len(sv_list)))
 
-            notebook = ttk.Notebook(parent); notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-            shap_importance_by_class = {}
             for ci, sv_c in enumerate(sv_list):
                 mean_abs_shap = np.mean(np.abs(sv_c), axis=0)
                 shap_importance_by_class[class_ids[ci]] = mean_abs_shap
 
+            # 每类一个页签
             for ci, sv_c in enumerate(sv_list):
                 class_frame = ttk.Frame(notebook); notebook.add(class_frame, text=f"Class {class_ids[ci]}")
                 class_nb = ttk.Notebook(class_frame); class_nb.pack(fill=tk.BOTH, expand=True)
 
+                # 1) Beeswarm（按该类的样本过滤，若样本不足提示）
                 beeswarm_frame = ttk.Frame(class_nb); class_nb.add(beeswarm_frame, text="Beeswarm Plot")
-                mask_pos = (np.array(y_test) == class_ids[ci])
-                if mask_pos.sum() >= 5:
+                y_arr = np.asarray(y_test); mask_cur = (y_arr == class_ids[ci])
+                if mask_cur.sum() >= 5:
                     fig_beeswarm = plt.figure(figsize=(12, 8))
-                    shap.summary_plot(sv_c[mask_pos], X_num.iloc[mask_pos], plot_type="dot", max_display=12, show=False)
+                    shap.summary_plot(sv_c[mask_cur], X_num.iloc[mask_cur], plot_type="dot", max_display=12, show=False)
                     fig_beeswarm.tight_layout()
                     canvas = FigureCanvasTkAgg(fig_beeswarm, master=beeswarm_frame)
                     canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-                    self._mpl_refs.append(canvas); plt.close(fig_beeswarm)
+                    self._mpl_refs.append(canvas)
+                    plt.close(fig_beeswarm)
                 else:
-                    ttk.Label(beeswarm_frame, text=f"Not enough samples ({mask_pos.sum()}) for beeswarm plot").pack(pady=20)
+                    ttk.Label(beeswarm_frame, text=f"Not enough samples for class {class_ids[ci]} (got {mask_cur.sum()}, need ≥5)").pack(pady=20)
 
+                # 2) 雷达图
                 radar_frame = ttk.Frame(class_nb); class_nb.add(radar_frame, text="Radar Chart")
-                self._create_shap_radar_chart(radar_frame, shap_importance_by_class[class_ids[ci]], X_num.columns, class_ids[ci])
+                self._create_shap_radar_chart(
+                    radar_frame,
+                    shap_importance_by_class[class_ids[ci]],
+                    X_num.columns,
+                    class_ids[ci]
+                )
 
+            # 类别对比雷达
             comp_frame = ttk.Frame(notebook); notebook.add(comp_frame, text="Class Comparison")
             available_classes = list(shap_importance_by_class.keys())
             self._create_comparison_radar_chart(comp_frame, shap_importance_by_class, X_num.columns, available_classes)
