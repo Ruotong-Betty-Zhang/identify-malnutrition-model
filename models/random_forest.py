@@ -60,7 +60,14 @@ class RandomForestModelTrainer:
             params = parameters
 
         # 网格搜索 + 交叉验证
-        grid = GridSearchCV(RandomForestClassifier(random_state=self.seed), params, cv=5, n_jobs=-1)
+        grid = GridSearchCV(
+            RandomForestClassifier(random_state=self.seed),
+            params,
+            cv=5,
+            n_jobs=-1,
+            scoring='recall_macro',   # 用宏平均Recall作为选优标准
+            refit=True                # 训练并返回以该指标最优的模型（默认True，可省略）
+        )
         grid.fit(X_train, y_train)
 
         print("Best parameters found: ", grid.best_params_)
