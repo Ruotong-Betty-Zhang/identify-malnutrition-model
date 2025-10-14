@@ -6,6 +6,9 @@ from sklearn.impute import KNNImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
 from pandas.api.types import is_numeric_dtype
+from sklearn.preprocessing import OrdinalEncoder
+from imblearn.over_sampling import SMOTE, SMOTENC
+from typing import Iterable, Optional, Union, Dict
 
 def calculate_age(basic_info, extra_info):
     """
@@ -394,3 +397,161 @@ def combine_malnutrition_labels(mal_df):
     # Combine the malnutrition labels into binary values
     temp_df['Malnutrition'] = temp_df['Malnutrition'].apply(lambda x: 0 if x in [0, 1, 2] else 1)
     return temp_df
+
+def smote_augment(
+    df: pd.DataFrame,
+    target_col: str,
+    cat_cols: Optional[Iterable[str]] = None,
+    cont_cols: Optional[Iterable[str]] = None,
+    id_cols: Optional[Iterable[str]] = None,
+    max_new_ratio: float = 0.5,
+    sampling_strategy: Union[str, float, Dict] = "auto",
+    k_neighbors: int = 5,
+    random_state: int = 42,
+) -> pd.DataFrame:
+    """
+    Perform oversampling data augmentation for tabular data using SMOTE / SMOTE-NC.
+    Returns: original data + newly synthesized samples (shuffled).
+
+    Parameters:
+    - target_col: name of the classification label column
+    - cat_cols: categorical/ordinal columns (if provided, use SMOTE-NC)
+    - cont_cols: continuous columns (if not provided, will be inferred automatically)
+    - id_cols: identifier columns (set to NaN in new samples to avoid misuse)
+    - max_new_ratio: maximum ratio of new samples relative to the number of samples used for oversampling
+    - sampling_strategy: imblearn sampling strategy ("auto" or dict)
+    - k_neighbors: k for SMOTE
+    - random_state: random seed
+    """
+    
+    rng = np.random.default_rng(random_state)
+    df = df.copy()
+
+    # Only use rows with non-missing target for SMOTE
+    mask = df[target_col].notna()
+    work = df.loc[mask].copy()
+
+    if id_cols is None:
+        id_cols = get_ignore_cols()
+    id_cols = [c for c in id_cols if c in work.columns]
+
+    # Automatically infer
+    if cat_cols is None or cont_cols is None:
+        cont_cols = get_cont_col()
+        cat_cols = [c for c in work.columns if c not in cont_cols + id_cols and c != target_col]
+
+    cat_cols = [c for c in cat_cols if c in work.columns]
+    cont_cols = [c for c in cont_cols if c in work.columns]
+    feature_cols = cat_cols + cont_cols
+    if len(feature_cols) == 0:
+        raise ValueError("No feature columns available for SMOTE.")
+
+    X_cat = work[cat_cols].copy() if cat_cols else pd.DataFrame(index=work.index)
+    X_cont = work[cont_cols].copy() if cont_cols else pd.DataFrame(index=work.index)
+    y = work[target_col].values
+
+    # Encode categorical columns (for internal use), keep continuous columns
+    use_nc = bool(cat_cols)
+    if use_nc:
+        enc = OrdinalEncoder(
+            handle_unknown="use_encoded_value",
+            unknown_value=-1,
+            encoded_missing_value=-1,
+        )
+        X_cat_enc = pd.DataFrame(
+            enc.fit_transform(X_cat),
+            columns=cat_cols,
+            index=X_cat.index
+        )
+        Xn = pd.concat([X_cat_enc, X_cont], axis=1)
+        cat_indices = list(range(len(cat_cols)))
+    else:
+        Xn = X_cont.copy()
+
+    # Reasonably set k
+    from collections import Counter
+    cls_counts = Counter(y)
+    min_cls = min(cls_counts.values())
+    k_eff = min(k_neighbors, max(1, min_cls - 1))
+
+    # Choose SMOTE / SMOTE-NC
+    if use_nc:
+        smote = SMOTENC(
+            categorical_features=cat_indices,
+            sampling_strategy=sampling_strategy,
+            k_neighbors=k_eff,
+            random_state=random_state,
+        )
+    else:
+        smote = SMOTE(
+            sampling_strategy=sampling_strategy,
+            k_neighbors=k_eff,
+            random_state=random_state,
+        )
+
+    # Oversample
+    X_res, y_res = smote.fit_resample(Xn.values, y)
+
+    # Control new sample size
+    n_orig = len(Xn)
+    n_new = len(X_res) - n_orig
+    if n_new <= 0:
+        out = df.sample(frac=1.0, random_state=random_state).reset_index(drop=True)
+    else:
+        max_new = int(n_orig * max_new_ratio)
+        keep_idx = rng.choice(n_new, size=max_new, replace=False) if (max_new > 0 and n_new > max_new) else np.arange(n_new)
+
+        X_new = X_res[-n_new:][keep_idx]
+        y_new = y_res[-n_new:][keep_idx]
+
+        # Inverse transform and assemble new samples (align column names & order with original data)
+        if use_nc:
+            X_new_cat = X_new[:, :len(cat_cols)]
+            X_new_cont = X_new[:, len(cat_cols):]
+            X_new_cat = enc.inverse_transform(X_new_cat)
+            df_cat_new = pd.DataFrame(X_new_cat, columns=cat_cols)
+            df_cont_new = pd.DataFrame(X_new_cont, columns=cont_cols)
+            new_part = pd.concat([df_cat_new, df_cont_new], axis=1)
+        else:
+            new_part = pd.DataFrame(X_new, columns=cont_cols)
+
+        new_part[target_col] = y_new
+
+        # Fill NaN for columns not in features
+        for c in df.columns:
+            if c not in new_part.columns:
+                new_part[c] = np.nan
+
+        # Set id columns to NaN
+        for c in id_cols:
+            if c in new_part.columns:
+                new_part[c] = np.nan
+
+        out = pd.concat([df, new_part], axis=0, ignore_index=True)
+        out = out.sample(frac=1.0, random_state=random_state).reset_index(drop=True)
+
+    # Make sure data types are consistent with original data
+    # Continuous columns to float
+    for c in cont_cols:
+        if c in out.columns:
+            out[c] = pd.to_numeric(out[c], errors="coerce").astype(float)
+
+    # Categorical columns to float (original cat_cols)
+    for c in cat_cols:
+        if c in out.columns:
+            out[c] = pd.to_numeric(out[c], errors="coerce").astype(float)
+
+    return out
+
+def get_ignore_cols():
+    return [
+        'IDno', 'Assessment_Date'
+    ]
+
+def get_cont_col():
+    return [
+        'iG12', 'iK1ab', 'iK1bb', "Scale_ADLHierarchy", "Scale_ADLLongForm", "Scale_ADLShortForm",
+        "Scale_AggressiveBehaviour", "Scale_BMI", "Scale_CHESS", "Scale_Communication", "Scale_CPS",
+        "Scale_DRS", "Scale_IADLCapacity", "Scale_IADLPerformance", "Scale_MAPLE", "Scale_Pain",
+        "Scale_PressureUlcerRisk", "OverallUrgencyScale", 'Age'
+    ]
