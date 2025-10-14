@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
 import locale
-from utils import calculate_age, drop_columns, combine_malnutrition_labels, calculate_malnutrition, generate_gender_column_and_carelevel, check_missing_values, fill_missing_by_idno_and_mode, calculate_feature_changes, knn_impute_missing_values,restore_integer_columns,knn_Classifier
+from utils import calculate_age, drop_columns, combine_malnutrition_labels, calculate_malnutrition, generate_gender_column_and_carelevel, check_missing_values, fill_missing_by_idno_and_mode, calculate_feature_changes, knn_impute_missing_values,restore_integer_columns,smote_augment
 from dotenv import load_dotenv
 import os
 
@@ -71,6 +71,9 @@ mal_2.to_pickle(os.path.join(dataset_folder, 'MAL_2.pkl'))
 
 mal_long = calculate_feature_changes(mal_2)
 mal_long.to_pickle(os.path.join(dataset_folder, 'MAL_L.pkl'))
+
+mal_2_aug = smote_augment(mal_2, target_col="Malnutrition", random_state=42)
+mal_2_aug.to_pickle(os.path.join(dataset_folder, 'MAL_2_AUG.pkl'))
 
 # # 生成df的年龄分布图
 # plt.figure(figsize=(10, 6))

@@ -1,5 +1,6 @@
 import models.random_forest as rf
 import models.xgboost as xgb
+import models.xgboost_aug as xgb_aug
 import os
 from dotenv import load_dotenv
 import pandas as pd
@@ -150,3 +151,17 @@ xgb_model.train(os.path.join(dataset_folder, 'CAP_2.pkl'), model_output)
 # # # Accuracy: 0.8188, macro recall: 0.62, weight recall: 0.82
 xgb_model.train(os.path.join(dataset_folder, 'CAP_L.pkl'), model_output)
 # Best parameters found: {'colsample_bytree': 1, 'learning_rate': 0.1, 'max_depth': 5, 'n_estimators': 100, 'subsample': 0.8}
+
+
+# Augmentation
+xgb_model_aug = xgb_aug.XGBoostModelTrainer()
+# Best parameters found: {'colsample_bytree': 1, 'learning_rate': 0.1, 'max_depth': 5, 'n_estimators': 50, 'subsample': 0.8}
+xgb_model_aug.train(os.path.join(dataset_folder, 'MAL_2_AUG.pkl'), model_output, parameters={
+    'colsample_bytree': [1],
+    'learning_rate': [0.1],
+    'max_depth': [5],
+    'n_estimators': [50],
+    'subsample': [0.8]
+    },
+    test_on_original=True
+)
