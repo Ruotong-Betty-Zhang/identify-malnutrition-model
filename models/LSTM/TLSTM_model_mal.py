@@ -15,6 +15,16 @@ from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 from sklearn.utils.class_weight import compute_class_weight
 from sklearn.metrics import roc_auc_score
+from outputs import count
+
+"""Time-aware LSTM (T-LSTM) for binary malnutrition classification.
+
+Builds per-ID, time-ordered sequences, standardizes features, appends a
+normalized time-delta column, and trains a T-LSTM where the cell state decays
+as a learnable function of the time gap. Includes ID-based splits, early
+stopping, evaluation (accuracy/report/confusion/ROC-AUC), and permutation
+feature importance.
+"""
 
 def set_seed(seed=42):
     torch.manual_seed(seed)
@@ -26,6 +36,17 @@ def set_seed(seed=42):
         torch.backends.cudnn.benchmark = False
 
 def prepare_sequence_data(df, id_col='IDno', time_col='Assessment_Date', target_col='Malnutrition'):
+    """Create per-ID sequences and append normalized time deltas.
+
+    Steps:
+      1) Parse timestamps ("%d%b%Y") and standardize non-ID/time/target features.
+      2) Compute per-assessment Time_Delta in days; normalize by dividing by 180.0.
+      3) Build (T, D) float32 tensors and use the last observed target as the label.
+
+    Returns:
+        tuple[list[Tensor], list[Tensor], list[int], list[Any]]:
+            X_seqs, y_seqs, lengths, id_list
+    """
     df[time_col] = pd.to_datetime(df[time_col], format="%d%b%Y")
     
     base_feature_cols = [col for col in df.columns if col not in [id_col, time_col, target_col]]
@@ -63,6 +84,7 @@ def prepare_sequence_data(df, id_col='IDno', time_col='Assessment_Date', target_
 
 
 def split_sequence_dataset_by_id(X_seqs, y_seqs, lengths, id_list, test_size=0.2, random_state=42):
+    """Split sequences into train/test by unique IDs; stratify when each class has ≥2 IDs."""
     unique_ids = list(set(id_list))
     
     id_to_label = {}
@@ -103,6 +125,7 @@ def split_sequence_dataset_by_id(X_seqs, y_seqs, lengths, id_list, test_size=0.2
 
 
 class MalnutritionDataset(Dataset):
+    """Thin wrapper for variable-length sequence tensors and integer labels."""
     def __init__(self, sequences, labels):
         self.sequences = sequences
         self.labels = labels
@@ -115,24 +138,7 @@ class MalnutritionDataset(Dataset):
 
 
 def collate_fn(batch):
-    sequences, labels = zip(*batch)
-    lengths = torch.tensor([len(seq) for seq in sequences])
-    padded_seqs = pad_sequence(sequences, batch_first=True)  # shape: (batch, max_seq, features)
-    labels = torch.stack(labels)
-    return padded_seqs, lengths, labels
-
-class MalnutritionDataset(Dataset):
-    def __init__(self, sequences, labels):
-        self.sequences = sequences
-        self.labels = labels
-    
-    def __len__(self):
-        return len(self.sequences)
-    
-    def __getitem__(self, idx):
-        return self.sequences[idx], self.labels[idx]
-
-def collate_fn(batch):
+    """Right-pad sequences and return (padded_seqs, lengths, labels)."""
     sequences, labels = zip(*batch)
     lengths = torch.tensor([len(seq) for seq in sequences])
     padded_seqs = pad_sequence(sequences, batch_first=True)  # shape: (batch, max_seq, features)
@@ -141,20 +147,34 @@ def collate_fn(batch):
 
 
 class TLSTMModel(nn.Module):
+    """Time-aware LSTM with a learnable decay gate driven by the time delta.
+
+    Args:
+        input_size (int): Feature dimension including time delta as the last column.
+        hidden_size (int): LSTM hidden size.
+        num_classes (int): Number of output classes (binary by default).
+
+    Forward:
+        x (Tensor): (B, T, D), last column is time delta.
+        lengths (Tensor): (B,) true lengths.
+
+    Returns:
+        Tensor: (B, num_classes) logits.
+    """
     def __init__(self, input_size, hidden_size=64, num_classes=3):
         super(TLSTMModel, self).__init__()
-        self.input_size = input_size - 1  # 减去时间差那一维
+        self.input_size = input_size - 1   # Exclude the last column reserved for time delta
         self.hidden_size = hidden_size
 
         self.input_layer = nn.Linear(self.input_size, hidden_size)
-        self.decay_layer = nn.Linear(1, hidden_size)  # 用时间差学习 decay gate
+        self.decay_layer = nn.Linear(1, hidden_size)  # Learn a decay gate from the time delta
 
         self.lstm_cell = nn.LSTMCell(hidden_size, hidden_size)
         self.output_layer = nn.Linear(hidden_size, num_classes)
         self.dropout = nn.Dropout(0.5)
 
     def forward(self, x, lengths):
-        # x shape: (batch, seq_len, input_size), 最后一列为 time_delta
+        # x shape: (batch, seq_len, input_size); the last column is the time delta
         batch_size, seq_len, _ = x.size()
 
         h_t = torch.zeros(batch_size, self.hidden_size, device=x.device)
@@ -182,6 +202,7 @@ class TLSTMModel(nn.Module):
         return out
 
 def check_the_time_difference(df):
+    """Report summary statistics of day gaps between assessments (Time_Delta)."""
     df['Assessment_Date'] = pd.to_datetime(df['Assessment_Date'], format="%d%b%Y")
 
     all_deltas = []
@@ -194,20 +215,21 @@ def check_the_time_difference(df):
 
     print("------ Time_Delta ------")
     print(f"Number of sample: {len(all_deltas)}")
-    print(f"Min: {np.min(all_deltas)} 天")
-    print(f"Max: {np.max(all_deltas)} 天")
-    print(f"Ave: {np.mean(all_deltas):.2f} 天")
-    print(f"Midd: {np.median(all_deltas):.2f} 天")
-    print(f"25th: {np.percentile(all_deltas, 25):.2f} 天")
-    print(f"75th: {np.percentile(all_deltas, 75):.2f} 天")
+    print(f"Min: {np.min(all_deltas)} days")
+    print(f"Max: {np.max(all_deltas)} days")
+    print(f"Mean: {np.mean(all_deltas):.2f} days")
+    print(f"Median: {np.median(all_deltas):.2f} days")
+    print(f"25th: {np.percentile(all_deltas, 25):.2f} days")
+    print(f"75th: {np.percentile(all_deltas, 75):.2f} days")
     print("number of unique time deltas:")
     for days in [7, 14, 30, 60, 90, 180, 365]:
-        count = np.sum((np.abs(all_deltas - days) <= 3))  # 允许3天误差范围
-        print(f" ≈ {days} 天: {count} 次")
+        count = np.sum((np.abs(all_deltas - days) <= 3))  # Allow ±3-day tolerance
+        print(f" ≈ {days} days: {count} occurrences")
 
 
 
 def train_model_with_early_stopping(model, train_loader, val_loader, optimizer, loss_fn, num_epochs=100, patience=5):
+    """Train with early stopping on validation accuracy and restore the best state."""
     best_acc = 0.0
     best_model_state = None
     patience_counter = 0
@@ -292,6 +314,7 @@ def train_model_with_early_stopping(model, train_loader, val_loader, optimizer, 
     return model
 
 def evaluate_model(model, dataloader):
+    """Compute accuracy, classification report, confusion matrix, and ROC-AUC (binary)."""
     model.eval()
     all_preds = []
     all_labels = []
@@ -325,6 +348,7 @@ def evaluate_model(model, dataloader):
         print("ROC AUC could not be computed, likely due to insufficient positive/negative samples.")
 
 class FocalLoss(nn.Module):
+    """Multi-class focal loss built on top of cross-entropy."""
     def __init__(self, alpha=1, gamma=2, weight=None):
         super(FocalLoss, self).__init__()
         self.alpha = alpha
@@ -338,6 +362,7 @@ class FocalLoss(nn.Module):
         return focal_loss
 
 def search_best_model(X_seqs, y_seqs, lengths, id_list):
+    """Grid-search hidden_size/lr/batch_size; keep the model with the best test accuracy."""
     hidden_sizes = [32, 64, 128, 256]
     learning_rates = [0.01, 0.001, 0.0005]
     batch_sizes = [16, 32, 64]
@@ -449,6 +474,7 @@ def search_best_model(X_seqs, y_seqs, lengths, id_list):
     return best_model, best_config
 
 def permutation_feature_importance(model, dataset, feature_idx, batch_size=32):
+    """Shuffle one feature across all timesteps; importance = baseline_acc - permuted_acc."""
     # dataset: MalnutritionDataset (X_seqs, y_seqs)
     
     model.eval()
