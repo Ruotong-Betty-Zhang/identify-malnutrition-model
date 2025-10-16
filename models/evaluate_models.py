@@ -46,7 +46,7 @@ def load_top12_features(model_info):
         return None
 
 def split_dataset_by_label(dataset_path, label_col):
-    print(f"📦 Loading dataset: {dataset_path}")
+    print(f" Loading dataset: {dataset_path}")
     df = pd.read_pickle(dataset_path)
 
     # 删除无关列（存在则删）
@@ -115,7 +115,7 @@ def train_multiple_models_and_select_best(X_train, X_test, y_train, y_test, sele
     results = []
 
     for model_type in model_types:
-        print(f"\n🧪 Training model: {model_type.upper()}")
+        print(f"\n Training model: {model_type.upper()}")
         model, report = train_with_selected_features(
             X_train, X_test, y_train, y_test,
             selected_features=selected_features,
@@ -133,7 +133,7 @@ def train_multiple_models_and_select_best(X_train, X_test, y_train, y_test, sele
     # 选出最好的模型
     best_model = max(results, key=lambda x: x["report"][sort_by])
 
-    print(f"\n✅ Best model: {best_model['model_type'].upper()} ({sort_by} = {best_model['report'][sort_by]:.4f})")
+    print(f"\nBest model: {best_model['model_type'].upper()} ({sort_by} = {best_model['report'][sort_by]:.4f})")
     return best_model
 
 
