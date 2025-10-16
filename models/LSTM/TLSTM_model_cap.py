@@ -12,6 +12,18 @@ from sklearn.preprocessing import StandardScaler, label_binarize
 import matplotlib.pyplot as plt
 from copy import deepcopy
 
+"""Time-aware LSTM (T-LSTM) with per-ID embeddings for CAP_Nutrition.
+
+Builds longitudinal sequences per ID, normalizes features, splits sequences
+whenever the target CAP_Nutrition state changes, and trains a T-LSTM with a
+learnable time-gap decay. Includes train/val split by ID, evaluation, and a
+sequence-aware permutation feature importance utility.
+
+Notes:
+- 'Time_Delta' is normalized within each ID to [0, 1].
+- Each subsequence segment is labeled by its segment-level target state.
+"""
+
 # ---------------------------
 # Utility
 # ---------------------------
@@ -28,6 +40,13 @@ def set_seed(seed=42):
 # Dataset supporting ID index
 # ---------------------------
 class MalnutritionDatasetWithID(Dataset):
+    """Dataset for variable-length sequences with labels and integer ID indices.
+
+    Args:
+        sequences (list[Tensor]): Each tensor (T, D).
+        labels (list[Tensor]): Each item is a scalar class index (long).
+        id_indices (list[int]): Integer indices for the ID embedding table.
+    """
     def __init__(self, sequences, labels, id_indices):
         self.sequences = sequences
         self.labels = labels
@@ -38,6 +57,14 @@ class MalnutritionDatasetWithID(Dataset):
         return self.sequences[idx], self.labels[idx], self.id_indices[idx]
 
 def collate_fn_with_id(batch):
+    """Right-pad sequences and return (padded, lengths, labels, id_indices).
+
+    Returns:
+        padded_seqs (Tensor): (B, T_max, D)
+        lengths (Tensor): (B,)
+        labels (Tensor): (B,)
+        id_indices (Tensor): (B,)
+    """
     sequences, labels, id_indices = zip(*batch)
     lengths = torch.tensor([len(seq) for seq in sequences])
     padded_seqs = pad_sequence(sequences, batch_first=True)
@@ -49,6 +76,23 @@ def collate_fn_with_id(batch):
 # T-LSTM Model with ID embedding
 # ---------------------------
 class TLSTMWithID(nn.Module):
+    """Time-aware LSTM cell with learnable decay and per-ID embedding.
+
+    Args:
+        input_size (int): Feature dimension incl. the Time_Delta column.
+        num_ids (int): Number of distinct IDs (embedding table size).
+        id_embed_dim (int): Dimension of the ID embedding.
+        hidden_size (int): LSTM hidden size.
+        num_classes (int): Number of output classes.
+
+    Forward:
+        x (Tensor): (B, T, D), last column is Time_Delta.
+        lengths (Tensor): (B,), true sequence lengths.
+        id_indices (Tensor): (B,), integer ID indices.
+
+    Returns:
+        logits (Tensor): (B, num_classes).
+    """
     def __init__(self, input_size, num_ids, id_embed_dim=16, hidden_size=64, num_classes=3):
         super(TLSTMWithID, self).__init__()
         self.input_size = input_size - 1  # time delta counted in input_size
@@ -70,7 +114,7 @@ class TLSTMWithID(nn.Module):
         id_embeds = self.id_embedding(id_indices)  # (batch, id_embed_dim)
         id_embeds = id_embeds.unsqueeze(1).repeat(1, seq_len, 1)  # (batch, seq_len, id_embed_dim)
 
-        x = torch.cat([x[:, :, :-1], id_embeds, x[:, :, -1:].clone()], dim=2)  # 拼接特征和id embedding以及time delta
+        x = torch.cat([x[:, :, :-1], id_embeds, x[:, :, -1:].clone()], dim=2)  # Concatenate original features with ID embedding and the time-delta column
 
         for t in range(seq_len):
             mask = (t < lengths).float().unsqueeze(1)
@@ -90,6 +134,16 @@ class TLSTMWithID(nn.Module):
 # Data Processing
 # ---------------------------
 def prepare_sequence_data_split_state(df, id_col='IDno', time_col='Assessment_Date', target_col='CAP_Nutrition'):
+    """Create per-ID, time-ordered sequences and segment on target-state changes.
+
+    Steps:
+      1) Parse timestamps ("%d%b%Y") and standardize non-ID/time/target features.
+      2) Compute per-ID normalized Time_Delta in [0, 1] from first assessment.
+      3) Split whenever target state changes; label each segment accordingly.
+
+    Returns:
+        seqs (list[Tensor]), labels (list[Tensor]), ids (list[Any]), feature_cols (list[str])
+    """
     df[time_col] = pd.to_datetime(df[time_col], format="%d%b%Y")
     base_feature_cols = [col for col in df.columns if col not in [id_col, time_col, target_col]]
     scaler = StandardScaler()
@@ -128,6 +182,13 @@ def prepare_sequence_data_split_state(df, id_col='IDno', time_col='Assessment_Da
     return seqs, labels, ids, feature_cols
 
 def split_dataset_by_id_with_id_index(seqs, labels, ids, test_size=0.2, random_state=42):
+    """Split by unique IDs (stratified when feasible) and return ID indices and mapping.
+
+    Returns:
+        (train_seqs, train_labels, train_id_indices),
+        (test_seqs,  test_labels,  test_id_indices),
+        id_to_idx (dict)
+    """
     ids = [str(x) for x in ids]
     unique_ids = sorted(list(set(ids)))
     id_to_idx = {pid: idx for idx, pid in enumerate(unique_ids)}
@@ -159,6 +220,7 @@ def split_dataset_by_id_with_id_index(seqs, labels, ids, test_size=0.2, random_s
 # Training & Evaluation
 # ---------------------------
 def train_model(model, train_loader, val_loader, optimizer, loss_fn, device, num_epochs=200, patience=200):
+    """Train with early stopping on validation loss; restore the best weights."""
     best_model = deepcopy(model.state_dict())
     best_val_loss = float('inf')
     patience_counter = 0
@@ -200,6 +262,7 @@ def train_model(model, train_loader, val_loader, optimizer, loss_fn, device, num
     return model
 
 def grid_search_model(train_loader, test_loader, input_size, num_classes, y_seqs, device):
+    """Grid-search hidden_size & learning_rate; keep the best test accuracy model."""
     param_grid = {
         'hidden_size': [32, 64, 128],
         'learning_rate': [0.01, 0.001, 0.0005],
@@ -251,6 +314,7 @@ def grid_search_model(train_loader, test_loader, input_size, num_classes, y_seqs
 
 
 def evaluate_model(model, dataloader, device, num_classes=3):
+    """Print accuracy, confusion matrix, classification report, and ROC-AUC (OVR for multi-class)."""
     model.eval()
     all_preds, all_labels, all_logits = [], [], []
     with torch.no_grad():
@@ -299,6 +363,7 @@ class FocalLoss(nn.Module):
 # Feature Importance (Permutation)
 # ---------------------------
 def permutation_feature_importance(model, dataset, feature_idx, device):
+    """Shuffle one feature across timesteps (sequence-aware) and report accuracy drop."""
     loader = DataLoader(dataset, batch_size=32, shuffle=False, collate_fn=collate_fn_with_id)
 
     def get_accuracy(mod):
@@ -326,8 +391,9 @@ def permutation_feature_importance(model, dataset, feature_idx, device):
     drop = baseline - get_accuracy(shuffled_model)
     return drop
 
-# 在训练前检查数据是否包含 NaN 或 Inf
+# Check for NaN/Inf in sequences and labels before training
 def check_data_for_nan_inf(seqs, labels):
+    """Warn if any sequence or label contains NaN or Inf."""
     for i, seq in enumerate(seqs):
         if torch.isnan(seq).any() or torch.isinf(seq).any():
             print(f"⚠️ Sequence {i} contains NaN or Inf")
