@@ -30,6 +30,13 @@ def set_seed(seed=42):
 # Dataset
 # ---------------------------
 class MalnutritionDataset(Dataset):
+    """Thin wrapper dataset for variable-length sequences and integer labels.
+
+    Args:
+        sequences (list[torch.Tensor]): Each tensor is (seq_len, input_size).
+        labels (list[torch.Tensor]): Each tensor is a scalar class index.
+
+    """
     def __init__(self, sequences, labels):
         self.sequences = sequences
         self.labels = labels
@@ -41,6 +48,17 @@ class MalnutritionDataset(Dataset):
         return self.sequences[idx], self.labels[idx]
 
 def collate_fn(batch):
+    """Pad sequences to the same length and return (padded, lengths, labels).
+
+    Args:
+        batch: Iterable of (sequence, label) pairs.
+
+    Returns:
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            - padded_seqs: (B, T_max, D)
+            - lengths: (B,) true lengths before padding
+            - labels: (B,) class indices
+    """
     sequences, labels = zip(*batch)
     lengths = torch.tensor([len(seq) for seq in sequences])
     padded_seqs = pad_sequence(sequences, batch_first=True)
@@ -51,6 +69,20 @@ def collate_fn(batch):
 # LSTM Model
 # ---------------------------
 class LSTMModel(nn.Module):
+    """Single-layer LSTM with simple attention pooling and a linear head.
+
+    Args:
+        input_size (int): Feature dimension per timestep.
+        hidden_size (int): LSTM hidden size.
+        num_classes (int): Number of output classes.
+
+    Forward Inputs:
+        x (torch.Tensor): (B, T, D) padded sequences.
+        lengths (torch.Tensor): (B,) true lengths.
+
+    Returns:
+        torch.Tensor: (B, num_classes) unnormalized logits.
+    """
     def __init__(self, input_size, hidden_size=64, num_classes=3):
         super(LSTMModel, self).__init__()
         self.lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size, batch_first=True)
@@ -74,6 +106,14 @@ class LSTMModel(nn.Module):
 # Focal Loss
 # ---------------------------
 class FocalLoss(nn.Module):
+    """Multi-class Focal Loss wrapper around cross-entropy.
+
+    Args:
+        alpha (torch.Tensor | None): Class weights (on device) or None.
+        gamma (float): Focusing parameter.
+        reduction (str): 'mean' or 'sum'.
+
+    """
     def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
         super(FocalLoss, self).__init__()
         self.alpha = alpha
@@ -90,6 +130,23 @@ class FocalLoss(nn.Module):
 # Data Processing
 # ---------------------------
 def prepare_sequence_data(df, id_col='IDno', time_col='Assessment_Date', target_col='CAP_Nutrition'):
+    """Build per-person time-ordered sequences; split when target state changes.
+
+    - Scales continuous columns (StandardScaler).
+    - Casts features to float32.
+    - For each ID, segments a new subsequence whenever the target changes,
+      and assigns the label as the state of that segment.
+
+    Args:
+        df (pd.DataFrame): Raw, row-per-assessment table.
+        id_col (str): Person identifier column.
+        time_col (str): Timestamp column (parsed to datetime).
+        target_col (str): Target label column.
+
+    Returns:
+        tuple[list[Tensor], list[Tensor], list[str]]:
+            sequences, labels, feature_cols
+    """
     df[time_col] = pd.to_datetime(df[time_col], format="%d%b%Y")
 
     all_cols = [col for col in df.columns if col not in [id_col, time_col, target_col]]
@@ -118,7 +175,7 @@ def prepare_sequence_data(df, id_col='IDno', time_col='Assessment_Date', target_
     scaler = StandardScaler()
     df[continuous_cols] = scaler.fit_transform(df[continuous_cols])
 
-    # 将所有用于训练的特征列强制转换为 float32，以避免类型错误
+    # Force all training feature columns to float32 to avoid dtype errors
     feature_cols = continuous_cols + discrete_cols
     df[feature_cols] = df[feature_cols].astype(np.float32)
 
@@ -143,6 +200,18 @@ def prepare_sequence_data(df, id_col='IDno', time_col='Assessment_Date', target_
 
 
 def split_dataset(seqs, labels, test_size=0.2, random_state=42):
+    """Index-based train/test split with stratification when possible.
+
+    Args:
+        seqs (list[Tensor]): Variable-length sequences.
+        labels (list[Tensor]): Scalar class tensors.
+        test_size (float): Proportion for test split.
+        random_state (int): RNG seed.
+
+    Returns:
+        ((list[Tensor], list[Tensor]), (list[Tensor], list[Tensor])):
+            (train_seqs, train_labels), (test_seqs, test_labels)
+    """
     y = np.array([l.item() for l in labels])
     stratify = y if min(pd.Series(y).value_counts()) > 1 else None
     indices = list(range(len(seqs)))
@@ -156,6 +225,20 @@ def split_dataset(seqs, labels, test_size=0.2, random_state=42):
 # ---------------------------
 # LSTM_model_cap.py (track and keep best test accuracy model)
 def train_model(model, train_loader, val_loader, optimizer, loss_fn, device, num_epochs=100):
+    """Train with early best-checkpointing by validation accuracy.
+
+    Args:
+        model (nn.Module): Network to train.
+        train_loader (DataLoader): Training batches.
+        val_loader (DataLoader): Validation batches.
+        optimizer (torch.optim.Optimizer): Optimizer instance.
+        loss_fn (Callable): Loss function (logits, targets) -> loss.
+        device (torch.device): CPU/GPU device.
+        num_epochs (int): Max epochs.
+
+    Returns:
+        nn.Module: Model loaded with the best-performing weights on val set.
+    """
     best_model = deepcopy(model.state_dict())
     best_val_acc = 0
 
@@ -194,6 +277,18 @@ def train_model(model, train_loader, val_loader, optimizer, loss_fn, device, num
 
 
 def evaluate_model(model, dataloader, device, num_classes=3):
+    """Compute accuracy, confusion matrix, classification report, and ROC-AUC.
+
+    Args:
+        model (nn.Module): Trained model.
+        dataloader (DataLoader): Evaluation data.
+        device (torch.device): CPU/GPU device.
+        num_classes (int): Number of classes.
+
+    Prints:
+        Accuracy, confusion matrix, classification report, and macro ROC-AUC
+        (multi-class OVR) when feasible.
+    """
     model.eval()
     all_preds, all_labels, all_logits = [], [], []
     with torch.no_grad():
@@ -225,6 +320,19 @@ def evaluate_model(model, dataloader, device, num_classes=3):
 # Grid Search
 # ---------------------------
 def grid_search_model(train_dataset, test_dataset, input_size, num_classes, class_weights, device):
+    """Grid-search hidden size & learning rate; keep the best test accuracy model.
+
+    Args:
+        train_dataset (Dataset): Training dataset.
+        test_dataset (Dataset): Testing dataset used as validation for search.
+        input_size (int): Feature dimension.
+        num_classes (int): Number of classes.
+        class_weights (torch.Tensor): Weights for Focal/Cross-Entropy.
+        device (torch.device): CPU/GPU device.
+
+    Returns:
+        nn.Module: Best-scoring model (deep-copied).
+    """
     param_grid = {
         'hidden_size': [32, 64, 128],
         'learning_rate': [0.01, 0.001, 0.0005]
