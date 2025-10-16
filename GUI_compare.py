@@ -14,6 +14,7 @@ import threading
 import warnings
 import re
 from matplotlib.figure import Figure
+import os
 
 warnings.filterwarnings('ignore')
 
@@ -627,11 +628,15 @@ class ModelComparisonApp:
         self.cmp_rep_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
         self.cmp_rep_right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
 
-        # 5) SHAP Top-N Comparison（雷达或提示）
+        # 5) SHAP Top-N Comparison（只保留可滚动容器）
         self.cmp_tab_shap = ttk.Frame(self.cmp_nb, padding=8)
         self.cmp_nb.add(self.cmp_tab_shap, text='SHAP (Top-N)')
-        self.cmp_shap_container = ttk.Frame(self.cmp_tab_shap)
-        self.cmp_shap_container.pack(fill=tk.BOTH, expand=True)
+
+        self.cmp_shap_scroll = ScrollableFrame(self.cmp_tab_shap)
+        self.cmp_shap_scroll.pack(fill=tk.BOTH, expand=True)
+
+        # 以后都往这个容器里放东西
+        self.cmp_shap_container = self.cmp_shap_scroll.body
 
 
     # ---------- 数据/模型加载 ----------
@@ -749,16 +754,24 @@ class ModelComparisonApp:
         if not a or not b:
             return
 
+        # === 新增：根据已选模型路径生成可读名字 ===
+        name_a = os.path.basename(self.model_path['A'].get()) or 'Model A'
+        name_b = os.path.basename(self.model_path['B'].get()) or 'Model B'
+
         # ========== 1) Metrics 页 ==========
         for i in self.cmp_metrics_tree.get_children():
             self.cmp_metrics_tree.delete(i)
+
+        # 动态更新表头
+        self.cmp_metrics_tree.heading('Model A', text=name_a)
+        self.cmp_metrics_tree.heading('Model B', text=name_b)
+        self.cmp_metrics_tree.heading('Δ (B-A)', text=f'Δ ({name_b} - {name_a})')
 
         def _fmt(x):
             return f"{x:.4f}" if isinstance(x, (int, float, np.floating)) else str(x)
 
         rows = [
             ('Accuracy', a.get('accuracy', np.nan), b.get('accuracy', np.nan)),
-            # 需要的话可在此追加 ('F1 (macro)', ...), ('Precision (macro)', ...), ('Recall (macro)', ...)
         ]
         for name, va, vb in rows:
             delta = (vb - va) if isinstance(va, (int, float, np.floating)) and isinstance(vb, (int, float, np.floating)) else ''
@@ -773,23 +786,22 @@ class ModelComparisonApp:
         figA = Figure(figsize=(6, 5)); axA = figA.add_subplot(111)
         sns.heatmap(a['cm'], annot=True, fmt='d', cmap='Blues',
                     xticklabels=a['classes'], yticklabels=a['classes'], ax=axA)
-        axA.set_title('Model A - Confusion Matrix'); axA.set_xlabel('Predicted'); axA.set_ylabel('True')
+        axA.set_title(f'{name_a} - Confusion Matrix'); axA.set_xlabel('Predicted'); axA.set_ylabel('True')
         FigureCanvasTkAgg(figA, master=self.cmp_cm_left).get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
         figB = Figure(figsize=(6, 5)); axB = figB.add_subplot(111)
         sns.heatmap(b['cm'], annot=True, fmt='d', cmap='Greens',
                     xticklabels=b['classes'], yticklabels=b['classes'], ax=axB)
-        axB.set_title('Model B - Confusion Matrix'); axB.set_xlabel('Predicted'); axB.set_ylabel('True')
+        axB.set_title(f'{name_b} - Confusion Matrix'); axB.set_xlabel('Predicted'); axB.set_ylabel('True')
         FigureCanvasTkAgg(figB, master=self.cmp_cm_right).get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # ========== 3) Feature Importance 页（Top-K 并排） ==========
+        # ========== 3) Feature Importance 页 ==========
         for w in self.cmp_fi_left.winfo_children():
             w.destroy()
         for w in self.cmp_fi_right.winfo_children():
             w.destroy()
 
         top_k = 12
-        # A
         if a.get('feature_importances') is not None:
             if isinstance(a['feature_importances'], dict):
                 fiA = sorted(a['feature_importances'].items(), key=lambda x: x[1], reverse=True)[:top_k]
@@ -800,12 +812,11 @@ class ModelComparisonApp:
             yA = np.arange(len(fiA))
             ax_fiA.barh(yA, [v for _, v in fiA])
             ax_fiA.set_yticks(yA); ax_fiA.set_yticklabels([f for f, _ in fiA]); ax_fiA.invert_yaxis()
-            ax_fiA.set_title('Model A - Top Feature Importances'); ax_fiA.set_xlabel('Importance')
+            ax_fiA.set_title(f'{name_a} - Top Feature Importances'); ax_fiA.set_xlabel('Importance')
             FigureCanvasTkAgg(fig_fiA, master=self.cmp_fi_left).get_tk_widget().pack(fill=tk.BOTH, expand=True)
         else:
-            ttk.Label(self.cmp_fi_left, text='Model A: Feature importance not available').pack(pady=12)
+            ttk.Label(self.cmp_fi_left, text=f'{name_a}: Feature importance not available').pack(pady=12)
 
-        # B
         if b.get('feature_importances') is not None:
             if isinstance(b['feature_importances'], dict):
                 fiB = sorted(b['feature_importances'].items(), key=lambda x: x[1], reverse=True)[:top_k]
@@ -816,12 +827,12 @@ class ModelComparisonApp:
             yB = np.arange(len(fiB))
             ax_fiB.barh(yB, [v for _, v in fiB])
             ax_fiB.set_yticks(yB); ax_fiB.set_yticklabels([f for f, _ in fiB]); ax_fiB.invert_yaxis()
-            ax_fiB.set_title('Model B - Top Feature Importances'); ax_fiB.set_xlabel('Importance')
+            ax_fiB.set_title(f'{name_b} - Top Feature Importances'); ax_fiB.set_xlabel('Importance')
             FigureCanvasTkAgg(fig_fiB, master=self.cmp_fi_right).get_tk_widget().pack(fill=tk.BOTH, expand=True)
         else:
-            ttk.Label(self.cmp_fi_right, text='Model B: Feature importance not available').pack(pady=12)
+            ttk.Label(self.cmp_fi_right, text=f'{name_b}: Feature importance not available').pack(pady=12)
 
-        # ========== 4) Reports 页（并排文本） ==========
+        # ========== 4) Reports 页 ==========
         for w in self.cmp_rep_left.winfo_children():
             w.destroy()
         for w in self.cmp_rep_right.winfo_children():
@@ -829,55 +840,51 @@ class ModelComparisonApp:
 
         txtA = scrolledtext.ScrolledText(self.cmp_rep_left, wrap=tk.WORD)
         txtA.pack(fill=tk.BOTH, expand=True)
-        txtA.insert(tk.END, 'Model A - Classification Report\n\n')
+        txtA.insert(tk.END, f'{name_a} - Classification Report\n\n')
         txtA.insert(tk.END, a.get('report', 'N/A'))
         txtA.config(state=tk.DISABLED)
 
         txtB = scrolledtext.ScrolledText(self.cmp_rep_right, wrap=tk.WORD)
         txtB.pack(fill=tk.BOTH, expand=True)
-        txtB.insert(tk.END, 'Model B - Classification Report\n\n')
+        txtB.insert(tk.END, f'{name_b} - Classification Report\n\n')
         txtB.insert(tk.END, b.get('report', 'N/A'))
         txtB.config(state=tk.DISABLED)
 
-        # ========== 5) SHAP Top-N Comparison 页（改为两个模型各自的“类型对比雷达图”） ==========
+        # ========== 5) SHAP Top-N Comparison 页 ==========
         for w in self.cmp_shap_container.winfo_children():
             w.destroy()
 
-        a = self.results.get('A', {})
-        b = self.results.get('B', {})
-
-        # 容器布局：左右两列分别放 A / B 的类型雷达，最上面有标题
-        ttk.Label(self.cmp_shap_container, text='Class Comparison Radar (Top-N by global mean |SHAP|)', font=('Arial', 14, 'bold')).pack(pady=6)
+        ttk.Label(self.cmp_shap_container,
+                text='Class Comparison Radar (Top-N by global mean |SHAP|)',
+                font=('Arial', 14, 'bold')).pack(pady=6)
         wrap = ttk.Frame(self.cmp_shap_container)
         wrap.pack(fill=tk.BOTH, expand=True)
 
         left = ttk.Frame(wrap); left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
         right = ttk.Frame(wrap); right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
 
-        # A
         if a.get('shap_by_class') and a.get('shap_feature_names') is not None:
             self._plot_class_comparison_radar(
                 left,
                 a['shap_by_class'],
                 a['shap_feature_names'],
-                title='Model A'
+                title=name_a
             )
         else:
-            ttk.Label(left, text='Model A: SHAP summary not available').pack(pady=12)
+            ttk.Label(left, text=f'{name_a}: SHAP summary not available').pack(pady=12)
 
-        # B
         if b.get('shap_by_class') and b.get('shap_feature_names') is not None:
             self._plot_class_comparison_radar(
                 right,
                 b['shap_by_class'],
                 b['shap_feature_names'],
-                title='Model B'
+                title=name_b
             )
         else:
-            ttk.Label(right, text='Model B: SHAP summary not available').pack(pady=12)
-
+            ttk.Label(right, text=f'{name_b}: SHAP summary not available').pack(pady=12)
 
         self.status_var.set('Comparison refreshed')
+
 
     # ---------- 工具：特征名/重要性/预处理/对齐 ----------
     def _get_feature_importances(self, model):
