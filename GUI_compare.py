@@ -18,8 +18,17 @@ import os
 
 warnings.filterwarnings('ignore')
 
+
+def show_error(message: str) -> None:
+    """Centralized error dialog."""
+    try:
+        messagebox.showerror("Error", message)
+    except Exception:
+        # Fallback for rare cases where Tk messagebox is not available
+        print(f"[Error] {message}")
+
 # ------------------------------
-# 可滚动容器（沿用你的实现）
+# Scrollable container
 # ------------------------------
 class ScrollableFrame(ttk.Frame):
     def __init__(self, parent, *args, **kwargs):
@@ -38,6 +47,7 @@ class ScrollableFrame(ttk.Frame):
         self.canvas.pack(side="left", fill="both", expand=True)
         self.vbar.pack(side="right", fill="y")
 
+        # Bind mouse wheel only when hovering over this widget
         for w in (self, self.canvas, self.inner):
             w.bind("<Enter>", self._bind_mousewheel)
             w.bind("<Leave>", self._unbind_mousewheel)
@@ -46,10 +56,12 @@ class ScrollableFrame(ttk.Frame):
     def body(self):
         return self.inner
 
+    # Windows/macOS: <MouseWheel>
     def _on_mousewheel(self, event):
         step = -1 if event.delta > 0 else 1
         self.canvas.yview_scroll(step * 3, "units")
 
+    # Linux: Button-4/5
     def _on_mousewheel_linux(self, event):
         if event.num == 4:
             self.canvas.yview_scroll(-3, "units")
@@ -68,7 +80,7 @@ class ScrollableFrame(ttk.Frame):
 
 
 # ------------------------------
-# 结果面板：渲染单个模型的所有结果
+# Result panel: render all outputs for a single model
 # ------------------------------
 class ResultPanel:
     def __init__(self, parent):
@@ -109,7 +121,7 @@ class ResultPanel:
         self.nb.add(self.tab_shap, text="SHAP Analysis")
         self.nb.add(self.tab_align, text="Feature Alignment")
 
-    # ---------- 渲染函数 ----------
+    # ---------- Renderers ----------
     def clear_tab(self, tab):
         for w in tab.winfo_children():
             w.destroy()
@@ -257,37 +269,37 @@ class ResultPanel:
                 model_classes = list(model_classes)
             uniq_y = list(np.unique(y_test))
 
-            # ========== 二分类：只显示一个页签（针对正类的 SHAP） ==========
+            # ========== Binary classification: Show only one tab (SHAP for positive class) ==========
             if (model_classes and len(model_classes) == 2) or (not model_classes and len(uniq_y) == 2):
-                # 判定正负类标签
+                # Determine positive and negative class labels
                 if model_classes and len(model_classes) == 2:
                     neg_label, pos_label = model_classes[0], model_classes[1]
                 else:
-                    # 没有 classes_，用 y_test 的排序后较大值当正类
+                    # No classes_, use the larger sorted value from y_test as positive class
                     neg_label, pos_label = sorted(uniq_y)[0], sorted(uniq_y)[1]
 
-                # 取“正类”的 SHAP 值
+                # Get SHAP values for the 'positive class'
                 if len(sv_list) == 1:
-                    sv_pos = np.asarray(sv_list[0])  # 常见：只返回正类
+                    sv_pos = np.asarray(sv_list[0])  # Common case: only positive class returned
                 else:
-                    # 存在两组时，按 classes 顺序取第二组，否则取 index=1 兜底
+                    # When two groups exist, take the second group by classes order, otherwise use index=1 as fallback
                     idx_pos = 1 if len(sv_list) > 1 else 0
                     sv_pos = np.asarray(sv_list[idx_pos])
 
                 if sv_pos.ndim != 2:
                     sv_pos = sv_pos.reshape(sv_pos.shape[0], -1)
 
-                # 均值 |SHAP| 供雷达使用
+                # Mean |SHAP| for radar chart usage
                 mean_abs = np.mean(np.abs(sv_pos), axis=0)
 
-                # --- 单页签 ---
+                # --- Single tab ---
                 notebook = ttk.Notebook(parent); notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
                 class_frame = ttk.Frame(notebook)
                 notebook.add(class_frame, text=f"Binary SHAP (pos={pos_label}, neg={neg_label})")
 
                 class_nb = ttk.Notebook(class_frame); class_nb.pack(fill=tk.BOTH, expand=True)
 
-                # 1) Beeswarm（全样本，不再按类过滤）
+                # 1) Beeswarm (all samples, no class filtering)
                 beeswarm_frame = ttk.Frame(class_nb); class_nb.add(beeswarm_frame, text="Beeswarm Plot")
                 fig_beeswarm = plt.figure(figsize=(12, 8))
                 shap.summary_plot(sv_pos, X_num, plot_type="dot", max_display=12, show=False)
@@ -297,7 +309,7 @@ class ResultPanel:
                 self._mpl_refs.append(canvas)
                 plt.close(fig_beeswarm)
 
-                # 2) 雷达图（标题里直接写正类）
+                # 2) Radar chart (include positive class in title)
                 radar_frame = ttk.Frame(class_nb); class_nb.add(radar_frame, text="Radar Chart")
                 self._create_shap_radar_chart(
                     radar_frame,
@@ -305,14 +317,14 @@ class ResultPanel:
                     X_num.columns,
                     class_id=f"pos={pos_label}"
                 )
-                return  # 二分类到此结束
+                return  # Binary classification ends here
 
-            # ========== 多分类：保留原来的“每类一个页签 + 对比” ==========
+            # ========== Multi-class classification: Keep original "one tab per class + comparison" ==========
             notebook = ttk.Notebook(parent); notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-            # 计算各类 mean|SHAP|
+            # Calculate mean|SHAP| for each class
             shap_importance_by_class = {}
-            # 确定 class_ids
+            # Determine class_ids
             if model_classes and len(model_classes) == len(sv_list):
                 class_ids = model_classes
             else:
@@ -325,12 +337,12 @@ class ResultPanel:
                 mean_abs_shap = np.mean(np.abs(sv_c), axis=0)
                 shap_importance_by_class[class_ids[ci]] = mean_abs_shap
 
-            # 每类一个页签
+            # One tab per class
             for ci, sv_c in enumerate(sv_list):
                 class_frame = ttk.Frame(notebook); notebook.add(class_frame, text=f"Class {class_ids[ci]}")
                 class_nb = ttk.Notebook(class_frame); class_nb.pack(fill=tk.BOTH, expand=True)
 
-                # 1) Beeswarm（按该类的样本过滤，若样本不足提示）
+                # 1) Beeswarm (filtered by samples of this class, show warning if insufficient samples)
                 beeswarm_frame = ttk.Frame(class_nb); class_nb.add(beeswarm_frame, text="Beeswarm Plot")
                 y_arr = np.asarray(y_test); mask_cur = (y_arr == class_ids[ci])
                 if mask_cur.sum() >= 5:
@@ -344,7 +356,7 @@ class ResultPanel:
                 else:
                     ttk.Label(beeswarm_frame, text=f"Not enough samples for class {class_ids[ci]} (got {mask_cur.sum()}, need ≥5)").pack(pady=20)
 
-                # 2) 雷达图
+                # 2) Radar chart
                 radar_frame = ttk.Frame(class_nb); class_nb.add(radar_frame, text="Radar Chart")
                 self._create_shap_radar_chart(
                     radar_frame,
@@ -353,7 +365,7 @@ class ResultPanel:
                     class_ids[ci]
                 )
 
-            # 类别对比雷达
+            # Class comparison radar
             comp_frame = ttk.Frame(notebook); notebook.add(comp_frame, text="Class Comparison")
             available_classes = list(shap_importance_by_class.keys())
             self._create_comparison_radar_chart(comp_frame, shap_importance_by_class, X_num.columns, available_classes)
@@ -371,7 +383,7 @@ class ResultPanel:
             top_features = [feature_names[i] for i in top_indices]
             top_importance = shap_importance[top_indices]
 
-            # ---- 关键：把半径标准化到 0~1，显示更稳 ----
+            # ---- Key: Normalize radius to 0~1 for stable display ----
             denom = float(top_importance.max()) if top_importance.size else 1.0
             if denom <= 0: denom = 1.0
             plot_vals = top_importance / denom
@@ -383,19 +395,19 @@ class ResultPanel:
             fig = Figure(figsize=(10, 8))
             ax = fig.add_subplot(111, polar=True)
 
-            # 画线
+            # Draw the line
             ax.plot(angles, values, linewidth=2)
             ax.fill(angles, values, alpha=0.25)
 
-            # ---- 关键：给子图更大的边距，避免裁切 ----
+            # ---- Key: Provide larger margins to avoid cutting ----
             fig.subplots_adjust(top=0.86, bottom=0.20, left=0.08, right=0.95)
 
-            # 标签自动换行，避免过长溢出
+            # Wrap labels automatically to avoid overflow
             import textwrap
             feature_labels = ['\n'.join(textwrap.wrap(str(f), width=16)) for f in top_features]
             ax.set_xticks(angles[:-1]); ax.set_xticklabels(feature_labels, fontsize=9)
 
-            # ---- 关键：半径固定到 1.05（标准化之后） ----
+            # ---- Key: Fix radius to 1.05 (after normalization) ----
             ax.set_ylim(0, 1.05)
             yticks = np.linspace(0, 1.0, 5)
             ax.set_yticks(yticks); ax.set_yticklabels([f"{v:.2f}" for v in yticks], fontsize=8)
@@ -408,7 +420,7 @@ class ResultPanel:
             canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
             self._mpl_refs.append(canvas)
 
-            # 表格（保留原始数值）
+            # Table (keep original values)
             table_frame = ttk.Frame(parent); table_frame.pack(fill=tk.X, padx=10, pady=5)
             tree = ttk.Treeview(table_frame, columns=('Rank','Feature','Mean|SHAP|'), show='headings',
                                 height=min(6, len(top_features)))
@@ -431,7 +443,7 @@ class ResultPanel:
             top_indices = np.argsort(mean_importance)[-top_n:][::-1]
             top_features = [feature_names[i] for i in top_indices]
 
-            # ---- 关键：用全类中的全局最大值做标准化 ----
+            # ---- Key: Normalize using global maximum across all classes ----
             global_max = float(np.max(all_importances[:, top_indices]))
             if global_max <= 0: global_max = 1.0
 
@@ -469,7 +481,7 @@ class ResultPanel:
             ttk.Label(parent, text=f"Comparison radar chart error: {str(e)}").pack(pady=20)
 
 # ------------------------------
-# 主应用：支持 A / B 两套数据+模型，并提供对比页
+# Main app: supports A/B datasets + models and a comparison page
 # ------------------------------
 class ModelComparisonApp:
     def __init__(self, root):
@@ -478,12 +490,12 @@ class ModelComparisonApp:
         self.root.geometry("1400x900")
         self.root.resizable(True, True)
 
-        # 共享预处理选项
+        # Shared preprocessing options
         self.handle_categorical = tk.BooleanVar(value=True)
         self.handle_datetime = tk.BooleanVar(value=True)
         self.remove_id = tk.BooleanVar(value=True)
 
-        # A / B 路径与格式
+        # A / B paths and formats
         self.dataset_path = {'A': tk.StringVar(), 'B': tk.StringVar()}
         self.model_path = {'A': tk.StringVar(), 'B': tk.StringVar()}
         self.data_format = {'A': tk.StringVar(value='pkl'), 'B': tk.StringVar(value='pkl')}
@@ -493,7 +505,7 @@ class ModelComparisonApp:
         self.model_feature_names = {'A': None, 'B': None}
         self.feature_importances = {'A': None, 'B': None}
 
-        # 评估结果缓存（便于对比页复用）
+        # Evaluation results cache (for reuse in comparison tab)
         self.results = {
             'A': {},
             'B': {},
@@ -511,7 +523,7 @@ class ModelComparisonApp:
         self.root.rowconfigure(0, weight=1)
         self.root.columnconfigure(0, weight=1)
 
-        # Top: A / B 两列设置区
+        # Top: A / B two-column settings area
         top = ttk.Frame(main)
         top.grid(row=0, column=0, sticky='ew')
         top.columnconfigure(0, weight=1)
@@ -520,21 +532,21 @@ class ModelComparisonApp:
         self._build_side_controls(top, side='A', col=0, label='Model A & Dataset A')
         self._build_side_controls(top, side='B', col=1, label='Model B & Dataset B')
 
-        # 预处理选项（共享）
+        # Preprocessing options (shared)
         pre = ttk.LabelFrame(main, text='Preprocessing (applies to both A & B)')
         pre.grid(row=1, column=0, sticky='ew', pady=(8,4))
         ttk.Checkbutton(pre, text="Encode categorical", variable=self.handle_categorical).pack(side=tk.LEFT, padx=8)
         ttk.Checkbutton(pre, text="Process datetime", variable=self.handle_datetime).pack(side=tk.LEFT, padx=8)
         ttk.Checkbutton(pre, text="Remove ID columns", variable=self.remove_id).pack(side=tk.LEFT, padx=8)
 
-        # 按钮区
+        # Action buttons
         btns = ttk.Frame(main)
         btns.grid(row=2, column=0, sticky='ew', pady=(6,6))
         ttk.Button(btns, text='Run A', command=lambda: self.run_evaluation('A')).pack(side=tk.LEFT, padx=5)
         ttk.Button(btns, text='Run B', command=lambda: self.run_evaluation('B')).pack(side=tk.LEFT, padx=5)
         ttk.Button(btns, text='Run A & B and Compare', command=self.run_compare).pack(side=tk.LEFT, padx=12)
 
-        # 结果区：上层 Notebook，包含三个页：A/B 详情 + Comparison 对比
+        # Results area: top notebook with A/B details and Comparison
         self.top_nb = ttk.Notebook(main)
         self.top_nb.grid(row=3, column=0, sticky='nsew', pady=(8,8))
         main.rowconfigure(3, weight=1)
@@ -549,10 +561,10 @@ class ModelComparisonApp:
         self.panelA = ResultPanel(self.tab_A)
         self.panelB = ResultPanel(self.tab_B)
 
-        # Comparison 页内部布局
+        # Comparison tab layout
         self._build_comparison_tab()
 
-        # 状态栏
+        # Status bar
         ttk.Label(main, textvariable=self.status_var).grid(row=4, column=0, sticky='w')
 
     def _build_side_controls(self, parent, side: str, col: int, label: str):
@@ -560,7 +572,7 @@ class ModelComparisonApp:
         box.grid(row=0, column=col, sticky='nsew', padx=6)
         parent.columnconfigure(col, weight=1)
 
-        # 数据集
+        # Dataset
         ttk.Label(box, text='Dataset Path:').grid(row=0, column=0, sticky='w', pady=3)
         ttk.Entry(box, textvariable=self.dataset_path[side], width=48).grid(row=0, column=1, sticky='ew', padx=6)
         ttk.Button(box, text='Browse', command=lambda s=side: self.browse_dataset(s)).grid(row=0, column=2, padx=4)
@@ -575,7 +587,7 @@ class ModelComparisonApp:
         combo.grid(row=2, column=1, sticky='w', padx=6)
         setattr(self, f'target_combo_{side}', combo)
 
-        # 模型
+        # Model
         ttk.Label(box, text='Model Path:').grid(row=3, column=0, sticky='w', pady=3)
         ttk.Entry(box, textvariable=self.model_path[side], width=48).grid(row=3, column=1, sticky='ew', padx=6)
         ttk.Button(box, text='Browse', command=lambda s=side: self.browse_model(s)).grid(row=3, column=2, padx=4)
@@ -584,12 +596,12 @@ class ModelComparisonApp:
             box.columnconfigure(c, weight=1)
 
     def _build_comparison_tab(self):
-        """Comparison 页面：使用内部 Notebook 分页展示不同对比项目"""
-        # 创建分页
+        """Comparison tab: use internal Notebook to display different comparison items"""
+        # Create sub-tabs
         self.cmp_nb = ttk.Notebook(self.tab_cmp)
         self.cmp_nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
-        # 1) Metrics 汇总
+        # 1) Metrics summary
         self.cmp_tab_metrics = ttk.Frame(self.cmp_nb, padding=8)
         self.cmp_nb.add(self.cmp_tab_metrics, text='Metrics')
         self.cmp_metrics_tree = ttk.Treeview(
@@ -604,7 +616,7 @@ class ModelComparisonApp:
             self.cmp_metrics_tree.column(col, width=w, anchor='center' if i else 'w')
         self.cmp_metrics_tree.pack(fill=tk.X, expand=True)
 
-        # 2) Confusion Matrices（并排）
+        # 2) Confusion Matrices
         self.cmp_tab_cm = ttk.Frame(self.cmp_nb, padding=8)
         self.cmp_nb.add(self.cmp_tab_cm, text='Confusion Matrices')
         self.cmp_cm_left = ttk.Frame(self.cmp_tab_cm)
@@ -612,7 +624,7 @@ class ModelComparisonApp:
         self.cmp_cm_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
         self.cmp_cm_right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
 
-        # 3) Feature Importance（并排）
+        # 3) Feature Importance
         self.cmp_tab_fi = ttk.Frame(self.cmp_nb, padding=8)
         self.cmp_nb.add(self.cmp_tab_fi, text='Feature Importance')
         self.cmp_fi_left = ttk.Frame(self.cmp_tab_fi)
@@ -620,7 +632,7 @@ class ModelComparisonApp:
         self.cmp_fi_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
         self.cmp_fi_right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
 
-        # 4) Classification Reports（并排文本）
+        # 4) Classification Reports (side-by-side)
         self.cmp_tab_reports = ttk.Frame(self.cmp_nb, padding=8)
         self.cmp_nb.add(self.cmp_tab_reports, text='Reports')
         self.cmp_rep_left = ttk.Frame(self.cmp_tab_reports)
@@ -628,18 +640,18 @@ class ModelComparisonApp:
         self.cmp_rep_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
         self.cmp_rep_right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
 
-        # 5) SHAP Top-N Comparison（只保留可滚动容器）
+        # 5) SHAP Top-N Comparison (scrollable)
         self.cmp_tab_shap = ttk.Frame(self.cmp_nb, padding=8)
         self.cmp_nb.add(self.cmp_tab_shap, text='SHAP (Top-N)')
 
         self.cmp_shap_scroll = ScrollableFrame(self.cmp_tab_shap)
         self.cmp_shap_scroll.pack(fill=tk.BOTH, expand=True)
 
-        # 以后都往这个容器里放东西
+        # All future content will be placed in this container
         self.cmp_shap_container = self.cmp_shap_scroll.body
 
 
-    # ---------- 数据/模型加载 ----------
+    # ---------- Data / Model loading ----------
     def browse_dataset(self, side: str):
         file_types = [("PKL files", "*.pkl"), ("CSV files", "*.csv"), ("All files", "*.*")]
         file_path = filedialog.askopenfilename(filetypes=file_types)
@@ -649,7 +661,7 @@ class ModelComparisonApp:
             if self.data_format[side].get() == 'pkl':
                 df = joblib.load(file_path)
             else:
-                df = pd.read_csv(file_path)
+                df = pd.read_csv(file_path, low_memory=False)
             if not isinstance(df, pd.DataFrame):
                 raise ValueError('Unsupported data format (expect DataFrame).')
             self.dataset_df[side] = df
@@ -659,7 +671,7 @@ class ModelComparisonApp:
                 self.target_var[side].set(df.columns[-1])
             self.status_var.set(f"Dataset {side} loaded: {df.shape}")
         except Exception as e:
-            messagebox.showerror('Error', f'Error loading dataset {side}: {e}')
+            show_error(f'Error loading dataset {side}: {e}')
 
     def browse_model(self, side: str):
         file_path = filedialog.askopenfilename(filetypes=[("Model files", "*.pkl;*.joblib"), ("All files", "*.*")])
@@ -672,9 +684,9 @@ class ModelComparisonApp:
             self.feature_importances[side] = self._get_feature_importances(model)
             self.status_var.set(f"Model {side} loaded")
         except Exception as e:
-            messagebox.showerror('Error', f'Error loading model {side}: {e}')
+            show_error(f'Error loading model {side}: {e}')
 
-    # ---------- 运行评估 & 对比 ----------
+    # ---------- Run evaluation & comparison ----------
     def run_evaluation(self, side: str):
         t = threading.Thread(target=lambda: self._run_eval_thread(side), daemon=True)
         t.start()
@@ -694,15 +706,32 @@ class ModelComparisonApp:
             model = self.model[side]
             target = self.target_var[side].get()
             if df is None or model is None:
-                messagebox.showerror('Error', f'Please load both dataset and model for {side}.'); return
+                self.root.after(0, lambda: show_error(f'Please load both dataset and model for {side}.'))
+                return
             if not target:
-                messagebox.showerror('Error', f'Please select target column for {side}.'); return
-
+                self.root.after(0, lambda: show_error(f'Please select target column for {side}.'))
+                return
             X = df.drop(columns=[target]); y = df[target]
             X_proc, prep_info = self._preprocess_data(X)
             X_align, align_info = self._align_features_with_model(X_proc, self.model_feature_names[side])
             if not align_info.get('aligned', False):
-                raise ValueError('Feature alignment failed')
+                # Enhanced error message for feature alignment failure
+                detailed_message = f"Feature Alignment Failed for {side}:\n\n"
+                detailed_message += align_info.get('details', '')
+                detailed_message += f"\nCurrent features: {len(align_info.get('current_features', []))}"
+                detailed_message += f"\nModel features: {len(align_info.get('model_features', []))}"
+                self.root.after(0, lambda: show_error(detailed_message))
+                self.status_var.set(f"Evaluation {side} failed - Feature alignment error")
+                return
+            
+            # Show feature alignment details if there are missing or extra features
+            if align_info.get('missing_features') or align_info.get('extra_features'):
+                detailed_message = f"Feature Alignment Details for {side}:\n\n"
+                detailed_message += align_info.get('details', '')
+                detailed_message += f"\nCurrent features: {len(align_info.get('current_features', []))}"
+                detailed_message += f"\nModel features: {len(align_info.get('model_features', []))}"
+                detailed_message += f"\nFinal features: {len(X_align.columns)}"
+                self.root.after(0, lambda: messagebox.showinfo("Feature Alignment Details", detailed_message))
 
             classes = np.unique(y)
             X_train, X_test, y_train, y_test = train_test_split(X_align, y, test_size=0.2, random_state=42)
@@ -711,7 +740,7 @@ class ModelComparisonApp:
             cm = confusion_matrix(y_test, y_pred, labels=classes)
             report = classification_report(y_test, y_pred, labels=classes, zero_division=0)
 
-            # 保存结果
+            # Cache results
             self.results[side] = {
                 'X_test': X_test,
                 'y_test': y_test,
@@ -727,13 +756,13 @@ class ModelComparisonApp:
                 'preprocess_info': prep_info,
             }
 
-            # 计算并缓存用于对比页的 SHAP 摘要（按类的 mean|SHAP|）
+            # # Compute and cache SHAP summary for the comparison tab (per-class mean |SHAP|)
             shap_stats = self._compute_shap_summary(model, X_test, y_test)
             self.results[side]['shap_by_class'] = shap_stats["by_class"]
             self.results[side]['shap_feature_names'] = shap_stats["feature_names"]
 
 
-            # 渲染到对应面板
+            # Render to the corresponding panel
             panel = self.panelA if side=='A' else self.panelB
             self.root.after(0, lambda: panel.render_accuracy(acc, prep_info))
             self.root.after(0, lambda: panel.render_cm(cm, classes))
@@ -744,25 +773,26 @@ class ModelComparisonApp:
 
             self.status_var.set(f"Evaluation {side} completed")
         except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror('Error', f'Error during evaluation {side}: {e}'))
+            self.root.after(0, lambda: show_error(f'Error during evaluation {side}: {e}'))
             self.status_var.set(f"Evaluation {side} failed")
 
+
     def _render_comparison(self):
-        # --- 读取缓存 ---
+        # --- Read cached results ---
         a = self.results.get('A', {})
         b = self.results.get('B', {})
         if not a or not b:
             return
 
-        # === 新增：根据已选模型路径生成可读名字 ===
+        # === Derive readable names from selected model paths ===
         name_a = os.path.basename(self.model_path['A'].get()) or 'Model A'
         name_b = os.path.basename(self.model_path['B'].get()) or 'Model B'
 
-        # ========== 1) Metrics 页 ==========
+        # ========== 1) Metrics tab ==========
         for i in self.cmp_metrics_tree.get_children():
             self.cmp_metrics_tree.delete(i)
 
-        # 动态更新表头
+        # Update table headers dynamically
         self.cmp_metrics_tree.heading('Model A', text=name_a)
         self.cmp_metrics_tree.heading('Model B', text=name_b)
         self.cmp_metrics_tree.heading('Δ (B-A)', text=f'Δ ({name_b} - {name_a})')
@@ -777,7 +807,7 @@ class ModelComparisonApp:
             delta = (vb - va) if isinstance(va, (int, float, np.floating)) and isinstance(vb, (int, float, np.floating)) else ''
             self.cmp_metrics_tree.insert('', 'end', values=(name, _fmt(va), _fmt(vb), _fmt(delta) if delta != '' else ''))
 
-        # ========== 2) Confusion Matrices 页 ==========
+        # ========== 2) Confusion Matrices tab ==========
         for w in self.cmp_cm_left.winfo_children():
             w.destroy()
         for w in self.cmp_cm_right.winfo_children():
@@ -795,7 +825,7 @@ class ModelComparisonApp:
         axB.set_title(f'{name_b} - Confusion Matrix'); axB.set_xlabel('Predicted'); axB.set_ylabel('True')
         FigureCanvasTkAgg(figB, master=self.cmp_cm_right).get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # ========== 3) Feature Importance 页 ==========
+        # ========== 3) Feature Importance tab ==========
         for w in self.cmp_fi_left.winfo_children():
             w.destroy()
         for w in self.cmp_fi_right.winfo_children():
@@ -832,7 +862,7 @@ class ModelComparisonApp:
         else:
             ttk.Label(self.cmp_fi_right, text=f'{name_b}: Feature importance not available').pack(pady=12)
 
-        # ========== 4) Reports 页 ==========
+        # ========== 4) Reports tab ==========
         for w in self.cmp_rep_left.winfo_children():
             w.destroy()
         for w in self.cmp_rep_right.winfo_children():
@@ -850,7 +880,7 @@ class ModelComparisonApp:
         txtB.insert(tk.END, b.get('report', 'N/A'))
         txtB.config(state=tk.DISABLED)
 
-        # ========== 5) SHAP Top-N Comparison 页 ==========
+        # ========== 5) SHAP Top-N Comparison tab ==========
         for w in self.cmp_shap_container.winfo_children():
             w.destroy()
 
@@ -886,7 +916,7 @@ class ModelComparisonApp:
         self.status_var.set('Comparison refreshed')
 
 
-    # ---------- 工具：特征名/重要性/预处理/对齐 ----------
+    # ---------- Utilities: feature names / importances / preprocessing / alignment ----------
     def _get_feature_importances(self, model):
         try:
             if hasattr(model, 'feature_importances_'):
@@ -970,19 +1000,19 @@ class ModelComparisonApp:
             info['aligned'] = True
         return X_aligned, info
     
-        # ---------- 计算 SHAP 摘要：按类别的 mean|SHAP| ----------
+        # ---------- Compute SHAP Summary: mean|SHAP| by class ----------
     def _compute_shap_summary(self, model, X_test: pd.DataFrame, y_test: pd.Series):
         """
-        返回:
+        Returns:
             {
                 "feature_names": pd.Index([...]),
-                "by_class": { class_id: np.ndarray[feat_dim], ... }   # 每个类别的 mean(|SHAP|)
+                "by_class": { class_id: np.ndarray[feat_dim], ... }   # mean(|SHAP|) for each class
             }
-        说明：
-            - 二分类时，使用“正类”的 SHAP（与常见解释一致），key 形如 "pos=<label>"。
-            - 多分类时，key 为类别标识（model.classes_ 或 y_test 的去重值）。
+        Notes:
+            - For binary classification, use SHAP values for the "positive class" (consistent with common explanations), with keys in format "pos=<label>".
+            - For multi-class classification, keys are class identifiers (model.classes_ or unique values from y_test).
         """
-        # —— 与 ResultPanel 中一致的数值化步骤（简化封装） ——
+        # —— Same numerical processing steps as in ResultPanel (simplified) ——
         def _sanitize(df: pd.DataFrame) -> pd.DataFrame:
             out = df.copy()
             out = out.replace({None: np.nan}).replace([np.inf, -np.inf], np.nan)
@@ -1005,7 +1035,7 @@ class ModelComparisonApp:
         if not isinstance(X_num, pd.DataFrame):
             X_num = pd.DataFrame(X_num, columns=[f"Feature_{i}" for i in range(X_num.shape[1])])
 
-        # —— 计算 SHAP 值（优先 TreeExplainer，失败则 LinearExplainer） ——
+        # —— Compute SHAP values (prefer TreeExplainer, fallback to LinearExplainer) ——
         try:
             explainer = shap.TreeExplainer(model, model_output="raw")
             sv = explainer.shap_values(X_num)
@@ -1018,7 +1048,7 @@ class ModelComparisonApp:
                 return sv_val
             arr = np.asarray(sv_val)
             if arr.ndim == 2:
-                return [arr]  # 单输出
+                return [arr]  # single output
             if arr.ndim == 3:
                 if n_classes_hint is None:
                     n_classes_hint = len(getattr(model, "classes_", [])) or len(np.unique(y_test))
@@ -1042,7 +1072,7 @@ class ModelComparisonApp:
 
         shap_by_class = {}
 
-        # —— 二分类：使用“正类”的 SHAP，作为整模的类型雷达 —— 
+        # —— Binary classification: Use SHAP values for 'positive class' for model-wide radar —— 
         if (model_classes and len(model_classes) == 2) or (not model_classes and len(uniq_y) == 2):
             if model_classes and len(model_classes) == 2:
                 neg_label, pos_label = model_classes[0], model_classes[1]
@@ -1062,7 +1092,7 @@ class ModelComparisonApp:
             shap_by_class[f"pos={pos_label}"] = mean_abs
             return {"feature_names": X_num.columns, "by_class": shap_by_class}
 
-        # —— 多分类：每个类别一条 mean|SHAP| ----
+        # —— Multi-class classification: One mean|SHAP| per class ----
         if model_classes and len(model_classes) == len(sv_list):
             class_ids = model_classes
         else:
@@ -1074,11 +1104,11 @@ class ModelComparisonApp:
 
         return {"feature_names": X_num.columns, "by_class": shap_by_class}
 
-    # ---------- 绘制“类型（按类）对比”雷达图（一个模型内多类叠加） ----------
+    # ---------- Plot "class comparison" radar chart (multiple classes overlay for one model) ----------
     def _plot_class_comparison_radar(self, parent, shap_by_class: dict, feature_names, title: str, top_n: int = 12):
         """
-        在 parent 内绘制：选取全类平均的 Top-N 特征，按“全局最大 mean|SHAP|”归一化后，
-        将各类别在同一雷达图上叠加，直观展示“类型差异”。
+        Plot in parent: Select Top-N features based on average across all classes, normalize by "global max mean|SHAP|",
+        and overlay all classes on the same radar chart to visually demonstrate "class differences".
         """
         try:
             class_ids = list(shap_by_class.keys())
@@ -1128,7 +1158,7 @@ class ModelComparisonApp:
 
 
 # ------------------------------
-# 入口
+# Main entry point
 # ------------------------------
 def main():
     root = tk.Tk()

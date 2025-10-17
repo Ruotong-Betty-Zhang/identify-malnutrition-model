@@ -34,7 +34,7 @@ class ScrollableFrame(ttk.Frame):
         self.canvas.pack(side="left", fill="both", expand=True)
         self.vbar.pack(side="right", fill="y")
 
-        # 只在“悬停”时绑定滚轮；离开时解绑
+        # Only bind mouse wheel when hovering; unbind when leaving
         for w in (self, self.canvas, self.inner):
             w.bind("<Enter>", self._bind_mousewheel)
             w.bind("<Leave>", self._unbind_mousewheel)
@@ -43,10 +43,10 @@ class ScrollableFrame(ttk.Frame):
     def body(self):
         return self.inner
 
-    # Windows / macOS: <MouseWheel>（macOS 的 delta 很小也适用）
+    # Windows / macOS: <MouseWheel> (works with macOS's small delta values too)
     def _on_mousewheel(self, event):
         step = -1 if event.delta > 0 else 1
-        self.canvas.yview_scroll(step * 3, "units")  # 调整 3 控制速度
+        self.canvas.yview_scroll(step * 3, "units")  # Adjust 3 to control speed
 
     # Linux: Button-4/5
     def _on_mousewheel_linux(self, event):
@@ -56,13 +56,13 @@ class ScrollableFrame(ttk.Frame):
             self.canvas.yview_scroll(3, "units")
 
     def _bind_mousewheel(self, _=None):
-        # 只在悬停本控件时把滚轮“接过来”
+        # Only take over the mouse wheel when hovering over this widget
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
         self.canvas.bind_all("<Button-4>", self._on_mousewheel_linux)
         self.canvas.bind_all("<Button-5>", self._on_mousewheel_linux)
 
     def _unbind_mousewheel(self, _=None):
-        # 鼠标离开：释放滚轮，不影响别的页面/控件
+        # Mouse leaves: release the mouse wheel, don't affect other pages/widgets
         self.canvas.unbind_all("<MouseWheel>")
         self.canvas.unbind_all("<Button-4>")
         self.canvas.unbind_all("<Button-5>")
@@ -186,16 +186,16 @@ class ModelEvaluationApp:
         main_frame.columnconfigure(1, weight=1)
     
     def get_feature_importances(self):
-        """获取特征重要性"""
+        """Get feature importances"""
         try:
             if hasattr(self.model, 'feature_importances_'):
-                # scikit-learn 模型
+                # scikit-learn model
                 return self.model.feature_importances_
             elif hasattr(self.model, 'get_booster'):
-                # XGBoost 模型
+                # XGBoost model
                 return self.model.get_booster().get_score(importance_type='weight')
             elif hasattr(self.model, 'coef_'):
-                # 线性模型系数
+                # Linear model coefficients
                 if len(self.model.coef_.shape) == 1:
                     return np.abs(self.model.coef_)
                 else:
@@ -206,15 +206,15 @@ class ModelEvaluationApp:
             return None
     
     def align_features_with_model(self, X, model_feature_names):
-        """确保数据特征与模型训练时的特征匹配"""
+        """Ensure data features match those used during model training"""
         X_aligned = X.copy()
         
-        # 获取当前数据的特征名称
+        # Get feature names from current data
         if hasattr(X_aligned, 'columns'):
             current_features = list(X_aligned.columns)
         else:
             current_features = [f"feature_{i}" for i in range(X_aligned.shape[1])]
-            # 如果模型有特征名称，使用模型的名称
+            # If model has feature names, use them
             if model_feature_names and len(model_feature_names) == X_aligned.shape[1]:
                 X_aligned = pd.DataFrame(X_aligned, columns=model_feature_names)
                 current_features = model_feature_names
@@ -229,28 +229,28 @@ class ModelEvaluationApp:
         }
         
         if model_feature_names:
-            # 找出缺失的特征
+            # Find missing features
             missing_features = set(model_feature_names) - set(current_features)
-            # 找出多余的特征
+            # Find extra features
             extra_features = set(current_features) - set(model_feature_names)
             
             alignment_info["missing_features"] = list(missing_features)
             alignment_info["extra_features"] = list(extra_features)
             
             if missing_features:
-                # 为缺失的特征添加默认值（0）
+                # Add default values (0) for missing features
                 for feature in missing_features:
                     X_aligned[feature] = 0
                 alignment_info["details"] += f"Added {len(missing_features)} missing features with default values (0)\n"
                 alignment_info["details"] += f"Missing features: {list(missing_features)}\n"
             
             if extra_features:
-                # 移除多余的特征
+                # Remove extra features
                 X_aligned = X_aligned.drop(columns=list(extra_features))
                 alignment_info["details"] += f"Removed {len(extra_features)} extra features not used in model training\n"
                 alignment_info["details"] += f"Extra features: {list(extra_features)}\n"
             
-            # 确保特征顺序与模型一致
+            # Ensure feature order matches model
             try:
                 X_aligned = X_aligned[model_feature_names]
                 alignment_info["aligned"] = True
@@ -265,16 +265,16 @@ class ModelEvaluationApp:
         return X_aligned, alignment_info
     
     def get_model_feature_names(self):
-        """获取模型训练时使用的特征名称"""
+        """Get feature names used during model training"""
         try:
-            # 尝试从模型属性获取特征名称
+            # Try to get feature names from model attributes
             if hasattr(self.model, 'feature_names_in_'):
                 return list(self.model.feature_names_in_)
             elif hasattr(self.model, 'get_booster'):
-                # XGBoost模型
+                # XGBoost model
                 return self.model.get_booster().feature_names
             elif hasattr(self.model, 'feature_importances_'):
-                # 如果有特征重要性但没名称，创建默认名称
+                # If feature importances exist but no names, create default names
                 n_features = len(self.model.feature_importances_)
                 return [f"feature_{i}" for i in range(n_features)]
             else:
@@ -283,25 +283,25 @@ class ModelEvaluationApp:
             return None
     
     def preprocess_data(self, X):
-        """预处理数据"""
+        """Preprocess data"""
         X_processed = X.copy()
         preprocessing_info = {"removed_columns": [], "encoded_columns": []}
         
-        # 处理每列的数据类型
+        # Process each column's data type
         for col in list(X_processed.columns):
             if col not in X_processed.columns:
                 continue
                 
             col_dtype = X_processed[col].dtype
             
-            # 更智能的ID列识别 - 只移除明确的ID列，不移除iD1这样的特征
+            # Smarter ID column detection - only remove explicit ID columns, not features like iD1
             if self.remove_id.get():
-                # 只移除明确的ID标识列，不移除看起来像特征名的列
+                # Only remove explicit ID columns, not columns that look like feature names
                 is_real_id = (col.lower() in ['id', 'idno', 'id_num', 'id_number', 'patient_id', 'sample_id'] or
                             col.lower().endswith('_id') or
                             col.lower().startswith('id_'))
                 
-                # 特别保留 iD1, iD2, iD3a, iD3b, iD4a, iD4b 等特征
+                # Specifically preserve features like iD1, iD2, iD3a, iD3b, iD4a, iD4b
                 is_important_feature = (col in ['iD1', 'iD2', 'iD3a', 'iD3b', 'iD4a', 'iD4b'] or
                                     col.startswith('iD') and len(col) > 2 and col[2:].isdigit())
                 
@@ -310,17 +310,17 @@ class ModelEvaluationApp:
                     preprocessing_info["removed_columns"].append(col)
                     continue
             
-            # 处理日期时间列
+            # Process datetime columns
             from pandas.api.types import is_datetime64_any_dtype
 
-            # 处理日期时间列
+            # Process datetime columns
             if self.handle_datetime.get() and is_datetime64_any_dtype(X_processed[col]):
                 X_processed = X_processed.drop(columns=[col])
                 preprocessing_info["removed_columns"].append(col)
                 continue
 
             
-            # 处理分类变量
+            # Process categorical variables
             elif self.handle_categorical.get() and col_dtype == 'object':
                 try:
                     le = LabelEncoder()
@@ -393,15 +393,15 @@ class ModelEvaluationApp:
             X = self.dataset.drop(columns=[target])
             y = self.dataset[target]
             
-            # 预处理数据
+            # Preprocess data
             X_processed, preprocessing_info = self.preprocess_data(X)
             
-            # 确保特征与模型匹配
+            # Ensure features match model
             X_aligned, alignment_info = self.align_features_with_model(X_processed, self.model_feature_names)
             if not alignment_info["aligned"]:
                 raise ValueError("Feature alignment failed")
             
-            # 显示详细的匹配信息
+            # Display detailed matching information
             if alignment_info["missing_features"] or alignment_info["extra_features"]:
                 detailed_message = "Feature Alignment Details:\n\n"
                 detailed_message += alignment_info["details"]
@@ -411,16 +411,16 @@ class ModelEvaluationApp:
                 
                 self.root.after(0, lambda: messagebox.showinfo("Feature Alignment Details", detailed_message))
             
-            # 分割数据
+            # Split data
             X_train, X_test, y_train, y_test = train_test_split(X_aligned, y, test_size=0.2, random_state=42)
             self.X_test = X_test
             self.y_test = y_test
             
-            # 进行预测
+            # Make predictions
             self.y_pred = self.model.predict(X_test)
             
-            # 计算指标
-            # 统一类标签（基于全量 y）
+            # Calculate metrics
+            # Unify class labels (based on full y)
             classes = np.unique(y)
 
             accuracy = accuracy_score(y_test, self.y_pred)
@@ -428,7 +428,7 @@ class ModelEvaluationApp:
             report = classification_report(y_test, self.y_pred, labels=classes, zero_division=0)
 
             self.root.after(0, self.update_accuracy_tab, accuracy, preprocessing_info)
-            self.root.after(0, self.update_cm_tab, cm, classes)  # 传同一份 classes
+            self.root.after(0, self.update_cm_tab, cm, classes)  # Pass the same classes
             self.root.after(0, self.update_report_tab, report)
             self.root.after(0, self.update_feature_importance_tab, X_aligned.columns)
             self.root.after(0, self.update_shap_tab, X_test)
@@ -485,20 +485,20 @@ class ModelEvaluationApp:
             return
         
         try:
-            # 创建特征重要性数据
+            # Create feature importance data
             if isinstance(self.feature_importances, dict):
-                # XGBoost格式的特征重要性
+                # XGBoost format feature importances
                 fi_data = []
                 for feature, importance in self.feature_importances.items():
                     fi_data.append((feature, importance))
                 fi_data.sort(key=lambda x: x[1], reverse=True)
             else:
-                # 数组格式的特征重要性
+                # Array format feature importances
                 fi_data = list(zip(feature_names, self.feature_importances))
                 fi_data.sort(key=lambda x: x[1], reverse=True)
             
-            # 创建特征重要性图表
-            fig = Figure(figsize=(14, 8))              # 新
+            # Create feature importance chart
+            fig = Figure(figsize=(14, 8))              # New
             ax = fig.add_subplot(111)
             top_k = 12
             features = [x[0] for x in fi_data[:top_k]]
@@ -517,7 +517,7 @@ class ModelEvaluationApp:
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
             self._mpl_refs.append(canvas)  
             
-            # 添加详细的特征重要性表格
+            # Add detailed feature importance table
             frame = ttk.Frame(self.fi_frame)
             frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
             
@@ -543,11 +543,11 @@ class ModelEvaluationApp:
         for widget in self.accuracy_frame.winfo_children():
             widget.destroy()
         
-        # 显示准确率
+        # Display accuracy
         ttk.Label(self.accuracy_frame, text=f"Model Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)", 
                  font=("Arial", 16)).pack(pady=10)
         
-        # 显示预处理信息
+        # Display preprocessing information
         if preprocessing_info["removed_columns"]:
             info_text = f"Removed columns: {', '.join(preprocessing_info['removed_columns'])}"
             ttk.Label(self.accuracy_frame, text=info_text, wraplength=600).pack(pady=5)
@@ -561,7 +561,7 @@ class ModelEvaluationApp:
             widget.destroy()
         
         # fig, ax = plt.subplots(figsize=(8, 6))
-        fig = Figure(figsize=(8, 6))                # 新
+        fig = Figure(figsize=(8, 6))                # New
         ax = fig.add_subplot(111)
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
                     xticklabels=class_names, yticklabels=class_names, ax=ax)
@@ -593,7 +593,7 @@ class ModelEvaluationApp:
         parent_for_content = scroll.body
 
         try:
-            # 使用您XGBoost代码中的数值化清洗方法
+            # Use numeric cleaning method from your XGBoost code
             def _sanitize(df: pd.DataFrame) -> pd.DataFrame:
                 out = df.copy()
                 out = out.replace({None: np.nan}).replace([np.inf, -np.inf], np.nan)
@@ -616,7 +616,7 @@ class ModelEvaluationApp:
             if not isinstance(X_num, pd.DataFrame):
                 X_num = pd.DataFrame(X_num, columns=[f"Feature_{i}" for i in range(X_num.shape[1])])
 
-            # 解释器
+            # Explainer
             try:
                 explainer = shap.TreeExplainer(self.model, model_output="raw")
                 sv = explainer.shap_values(X_num)
@@ -628,76 +628,76 @@ class ModelEvaluationApp:
                     print(f"[SHAP] Explainer failed: {e2}")
                     return
 
-            # ---- 统一成 list[n_classes]，每个元素形状为 (n_samples, n_features) ----
+            # ---- Unify into list[n_classes], each element has shape (n_samples, n_features) ----
             def _split_sv_to_list(sv_val, n_classes_hint=None):
-                # sv 可能是 list、(n_samples,n_features)、(n_samples,n_classes,n_features)
-                # 或 (n_samples,n_features,n_classes)
+                # sv could be list, (n_samples,n_features), (n_samples,n_classes,n_features)
+                # or (n_samples,n_features,n_classes)
                 if isinstance(sv_val, list):
                     return sv_val
 
                 arr = np.asarray(sv_val)
                 if arr.ndim == 2:
-                    # 二分类/回归：一个输出
+                    # Binary classification/regression: one output
                     return [arr]
 
                 if arr.ndim == 3:
-                    # 猜测类别所在维度：优先用 model.classes_ 或 y_test 的唯一类数
+                    # Guess which dimension contains classes: prefer model.classes_ or unique class count from y_test
                     if n_classes_hint is None:
                         n_classes_hint = len(getattr(self.model, "classes_", [])) or len(np.unique(self.y_test))
 
-                    # 优先匹配“某一维 == n_classes_hint”
+                    # First try to match any dimension == n_classes_hint
                     for axis, size in enumerate(arr.shape):
                         if n_classes_hint and size == n_classes_hint:
                             return [np.take(arr, i, axis=axis) for i in range(size)]
 
-                    # 次优：若最后一维比较小（<=10）当作类别维
+                    # Second option: if last dimension is small (<=10), treat as class dimension
                     if arr.shape[-1] <= 10:
                         return [arr[..., i] for i in range(arr.shape[-1])]
-                    # 再次优：若中间维比较小（<=10）当作类别维
+                    # Third option: if middle dimension is small (<=10), treat as class dimension
                     if arr.shape[1] <= 10:
                         return [arr[:, i, :] for i in range(arr.shape[1])]
-                    # 兜底：按第一维切（多数树模型的旧返回）
+                    # Fallback: split by first dimension (legacy return from most tree models)
                     return [arr[i] for i in range(arr.shape[0])]
 
                 raise ValueError(f"Unexpected SHAP shape: {arr.shape}")
 
-            # 基于 hint 进行拆分
+            # Split based on hint
             n_classes_hint = len(getattr(self.model, "classes_", [])) or len(np.unique(self.y_test))
             sv_list = _split_sv_to_list(sv, n_classes_hint=n_classes_hint)
 
-            # ---- 类别标签对齐：以 sv_list 的长度为准，避免越界 ----
+            # ---- Align class labels: use sv_list length to avoid out-of-bounds ----
             model_classes = getattr(self.model, "classes_", None)
             if isinstance(model_classes, (list, np.ndarray)) and len(model_classes) == len(sv_list):
                 class_ids = list(model_classes)
             else:
-                # 用测试集出现的类与 sv_list 对齐，否则退化为 0..n-1
+                # Align with classes present in test set and sv_list, otherwise fallback to 0..n-1
                 test_classes = list(np.unique(self.y_test))
                 if len(test_classes) == len(sv_list):
                     class_ids = test_classes
                 else:
                     class_ids = list(range(len(sv_list)))
             
-            # 创建主选项卡
+            # Create main tabs
             notebook = ttk.Notebook(parent_for_content)
             notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-            # 计算每个类别的平均SHAP绝对值（特征重要性）
+            # Calculate mean absolute SHAP values (feature importance) for each class
             shap_importance_by_class = {}
             for ci, sv_c in enumerate(sv_list):
-                # 平均绝对SHAP值作为特征重要性
+                # Mean absolute SHAP value as feature importance
                 mean_abs_shap = np.mean(np.abs(sv_c), axis=0)
                 shap_importance_by_class[class_ids[ci]] = mean_abs_shap
 
-            # 为每个类别创建选项卡
+            # Create tabs for each class
             for ci, sv_c in enumerate(sv_list):
                 class_frame = ttk.Frame(notebook)
                 notebook.add(class_frame, text=f"Class {class_ids[ci]}")
 
-                # 创建子选项卡（Beeswarm和雷达图）
+                # Create sub-tabs (Beeswarm and Radar chart)
                 class_notebook = ttk.Notebook(class_frame)
                 class_notebook.pack(fill=tk.BOTH, expand=True)
 
-                # Beeswarm图标签页
+                # Beeswarm plot tab
                 beeswarm_frame = ttk.Frame(class_notebook)
                 class_notebook.add(beeswarm_frame, text="Beeswarm Plot")
 
@@ -705,7 +705,7 @@ class ModelEvaluationApp:
                 if mask_pos.sum() >= 5:
                     X_num_disp = self._with_readable_columns(X_num)
 
-                    # —— 关键：为 SHAP 专门创建一个新的 pyplot figure —— #
+                    # —— Important: Create a new pyplot figure specifically for SHAP —— #
                     fig_beeswarm = plt.figure(figsize=(12, 8))
                     shap.summary_plot(
                         sv_c[mask_pos], X_num_disp.iloc[mask_pos],
@@ -717,7 +717,7 @@ class ModelEvaluationApp:
                     canvas_beeswarm.draw()
                     canvas_beeswarm.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-                    # 保存引用并从 pyplot 注销，避免影响后续图形
+                    # Save reference and unregister from pyplot to avoid affecting subsequent plots
                     self._mpl_refs.append(canvas_beeswarm)
                     plt.close(fig_beeswarm)
                 else:
@@ -726,19 +726,19 @@ class ModelEvaluationApp:
                         text=f"Not enough samples ({mask_pos.sum()}) for beeswarm plot"
                     ).pack(pady=20)
 
-                # 雷达图标签页
+                # Radar chart tab
                 radar_frame = ttk.Frame(class_notebook)
                 class_notebook.add(radar_frame, text="Radar Chart")
 
-                # 创建雷达图
+                # Create radar chart
                 self._create_shap_radar_chart(radar_frame, shap_importance_by_class[class_ids[ci]], 
                                             X_num.columns, class_ids[ci])
 
-            # # 添加比较所有类别的雷达图标签页
+            # # Add comparison radar chart tab for all classes
             # comparison_frame = ttk.Frame(notebook)
             # notebook.add(comparison_frame, text="Class Comparison")
 
-            # 创建比较所有类别的雷达图
+            # Create comparison radar chart for all classes
             # shap_importance_by_class = {}
             # for ci, sv_c in enumerate(sv_list):
             #     mean_abs_shap = np.mean(np.abs(sv_c), axis=0)  # (n_features,)
@@ -765,12 +765,12 @@ class ModelEvaluationApp:
             print(f"SHAP error: {e}")
 
     def _with_readable_columns(self, X: pd.DataFrame) -> pd.DataFrame:
-        """返回用于绘图的列名副本（可读名称）"""
-        # 如果没有特征名称映射，使用原始列名
+        """Return a copy with readable column names for plotting"""
+        # If no feature name mapping exists, use original column names
         if not hasattr(self, 'feature_name_map') or not self.feature_name_map:
             return X.copy()
         
-        # 创建可读的列名
+        # Create readable column names
         readable_columns = []
         for col in X.columns:
             base_col = re.sub(r"(_scaled|_std|_lag\d+|_zscore)$", "", str(col))
@@ -782,7 +782,7 @@ class ModelEvaluationApp:
         return X_disp
 
     def _compose_display_labels(self, names, codes):
-        """名称与代码合并为唯一标签：Name (Code)"""
+        """Combine names and codes into unique labels: Name (Code)"""
         labels = []
         for n, c in zip(names, codes):
             if str(n) == str(c):
@@ -792,7 +792,7 @@ class ModelEvaluationApp:
         return labels
 
     def _map_feature_names(self, cols):
-        """将特征代码映射为可读名称"""
+        """Map feature codes to readable names"""
         if not hasattr(self, 'feature_name_map') or not self.feature_name_map:
             return list(cols)
         
@@ -823,29 +823,29 @@ class ModelEvaluationApp:
             ttk.Label(self.preview_frame, text=f"Preview error: {str(e)}").pack(pady=20)
     
     def _create_shap_radar_chart(self, parent, shap_importance, feature_names, class_id, top_n=12):
-        """为单个类别创建 SHAP 重要性雷达图（绝对值刻度，不做归一化）"""
+        """Create SHAP importance radar chart for a single class (absolute scale, no normalization)"""
         try:
-            # 1) 取该类 Top-N 特征（按 mean|SHAP| 排序）
+            # 1) Get Top-N features for this class (sorted by mean|SHAP|)
             top_n = min(top_n, len(feature_names))
             top_indices = np.argsort(shap_importance)[-top_n:][::-1]
             top_features = [feature_names[i] for i in top_indices]
-            top_importance = shap_importance[top_indices]  # 真实 mean|SHAP| 值
+            top_importance = shap_importance[top_indices]  # Real mean|SHAP| values
 
-            # 2) 极坐标角度（闭合多边形）
+            # 2) Polar angles (closed polygon)
             N = len(top_features)
             angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
-            angles += angles[:1]  # 闭合
+            angles += angles[:1]  # Close
 
-            # 3) 准备值并闭合
+            # 3) Prepare values and close the polygon
             values = np.concatenate([top_importance, [top_importance[0]]])
 
-            # 4) 画图（不归一化，使用绝对刻度）
+            # 4) Plot (no normalization, using absolute scale)
             fig = Figure(figsize=(10, 8))
             ax = fig.add_subplot(111, polar=True)
             ax.plot(angles, values, color='red', linewidth=2)
             ax.fill(angles, values, color='red', alpha=0.25)
 
-            # 5) 轴与标注
+            # 5) Axes and annotations
             feature_labels = self._map_feature_names(top_features)
             ax.set_xticks(angles[:-1])
             ax.set_xticklabels(feature_labels, fontsize=9)
@@ -856,7 +856,7 @@ class ModelEvaluationApp:
             ax.set_ylim(0, ymax * 1.05)
             yticks = np.linspace(0, ymax, 5)
             ax.set_yticks(yticks)
-            ax.set_yticklabels([f"{v:.3g}" for v in yticks], fontsize=8)  # 显示真实 SHAP 数值
+            ax.set_yticklabels([f"{v:.3g}" for v in yticks], fontsize=8)  # Display real SHAP values
 
             ax.set_title(f"Top {top_n} Features - Class {class_id}\n(by absolute mean |SHAP|)",
                         fontsize=14, fontweight='bold', pad=20)
@@ -868,7 +868,7 @@ class ModelEvaluationApp:
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
             self._mpl_refs.append(canvas)
 
-            # 6) 下方表格：同步显示 Top-N 的真实 mean|SHAP|
+            # 6) Table below: show real mean|SHAP| values for Top-N features
             table_frame = ttk.Frame(parent)
             table_frame.pack(fill=tk.X, padx=10, pady=5)
 
@@ -899,9 +899,9 @@ class ModelEvaluationApp:
 
 
     def _create_comparison_radar_chart(self, parent, shap_importance_dict, feature_names, class_ids, top_n=12):
-        """比较各类别的 mean|SHAP|：使用统一的绝对刻度（不做归一化），保证绝对量级可比"""
+        """Compare mean|SHAP| across classes: use unified absolute scale (no normalization) to ensure comparable magnitudes"""
         try:
-            # 1) 选择用于比较的特征索引：优先用模型FI，否则用跨类 mean|SHAP|
+            # 1) Select feature indices for comparison: prefer model FI, otherwise use cross-class mean|SHAP|
             if self.feature_importances is not None:
                 if isinstance(self.feature_importances, dict):
                     fi_vec = np.array([self.feature_importances.get(str(f), 0.0) for f in feature_names], dtype=float)
@@ -918,37 +918,37 @@ class ModelEvaluationApp:
             top_features = [feature_names[i] for i in top_indices]
             N = len(top_features)
 
-            # 2) 极坐标角度（闭合）
+            # 2) Polar angles (closed)
             angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
             angles += angles[:1]
 
-            # 3) 统一绝对刻度：在所有“类别 × 选中Top-N特征”上求全局最大
+            # 3) Unified absolute scale: find global maximum across all "classes × selected Top-N features"
             all_importances = np.stack([shap_importance_dict[c] for c in class_ids])  # (n_classes, n_features)
             global_max = float(np.max(all_importances[:, top_indices])) if top_indices is not None else float(np.max(all_importances))
             if global_max <= 0:
-                global_max = 1.0  # 防止全0导致除0/空图
+                global_max = 1.0  # Prevent division by zero/empty plot when all zeros
 
-            # 4) 画图（不做任何归一化！）
+            # 4) Plot (no normalization at all!)
             fig = Figure(figsize=(12, 9))
             ax = fig.add_subplot(111, polar=True)
 
             colors = plt.cm.Set3(np.linspace(0, 1, len(class_ids)))
             for i, class_id in enumerate(class_ids):
-                importance = shap_importance_dict[class_id][top_indices]      # 真实 mean|SHAP|（绝对值）
-                values = np.concatenate([importance, [importance[0]]])        # 闭合
+                importance = shap_importance_dict[class_id][top_indices]      # Real mean|SHAP| (absolute values)
+                values = np.concatenate([importance, [importance[0]]])        # Close
                 ax.plot(angles, values, linewidth=2, linestyle='solid', label=f'Class {class_id}', color=colors[i])
                 ax.fill(angles, values, color=colors[i], alpha=0.10)
 
-            # 5) 轴与标注（同一绝对刻度）
+            # 5) Axes and annotations (same absolute scale)
             feature_labels = self._map_feature_names(top_features)
             ax.set_xticks(angles[:-1])
             ax.set_xticklabels(feature_labels, fontsize=9)
 
-            # y 轴用全局最大值设上限，确保不同类别可比
+            # Set y-axis upper limit with global maximum to ensure comparability across classes
             ax.set_ylim(0, global_max * 1.05)
-            yticks = np.linspace(0, global_max, 5)  # 0, 25%, 50%, 75%, 100% 的“绝对数值”刻度
+            yticks = np.linspace(0, global_max, 5)  # 0, 25%, 50%, 75%, 100% of "absolute value" scale
             ax.set_yticks(yticks)
-            ax.set_yticklabels([f"{v:.3g}" for v in yticks], fontsize=8)  # 直显示真实 SHAP 数值（非百分比）
+            ax.set_yticklabels([f"{v:.3g}" for v in yticks], fontsize=8)  # Display real SHAP values directly (not percentages)
 
             ax.set_title(f"Top {top_n} Features Comparison Across Classes\n(Absolute mean |SHAP|, same scale)", 
                         fontsize=14, fontweight='bold', pad=20)
