@@ -15,7 +15,6 @@ from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 from sklearn.utils.class_weight import compute_class_weight
 from sklearn.metrics import roc_auc_score
-from outputs import count
 
 """Time-aware LSTM (T-LSTM) for binary malnutrition classification.
 
