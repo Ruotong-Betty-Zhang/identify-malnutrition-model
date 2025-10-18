@@ -8,20 +8,31 @@ A model evaluation and comparison interface is developed to provide an easy-to-u
 # Setup
 ## Python
 This project runs on Python 3.12 - Python 3.13
-The following code sets up a virtual environment for Python 3.12
+The following code sets up a virtual environment for Python 3.12 and runs the setup script to create folders for further use
 ```bash
 py -3.12 -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements.txt
+python setup.py
 ```
 
 ## .env
 Create a `.env` file in the `/` directory with the following content
 ```
 PASSWORD = "The password of the dataset CSV file"
-CSV_PATH = "The path of the dataset CSV file"
-DATASET_FOLDER = "The output folder where the processed dataset .pkl file will be stored"
-MODEL_OUTPUT = "The output folder of trained models"
+CSV_PATH = "The path of the dataset CSV file (./input/)"
+FEATURE_DICT_PATH = "The path of the feature dictionary CSV file (./input/)"
+DATASET_FOLDER = "The output folder where the processed dataset .pkl file will be stored (./datasets)"
+MODEL_OUTPUT = "The output folder of trained models (./outputs)"
 ```
+Please follow the directory instructions in the bracket above to avoid uploading raw data, datasets, and model files to GitHub
 
 # How to Run
+- read_dataset.py
+  This file reads the dataset according to the .env path and stores processed dataframes in .pkl form in the datasets folder.
+- main.py
+  This file uses the dataframes in the datasets folder to train models accordingly. The result is printed in the console and stored in the outputs folder.
+- GUI-compare.py
+  This file opens the graphical interface that is used to evaluate and compare models. It can also run with just one model.
+- ./models/LSTM/
+  The four files under this directory are training files of LSTM models. Simply runs the file to start the training. Modify the dataset path in the `__main__` function manually.

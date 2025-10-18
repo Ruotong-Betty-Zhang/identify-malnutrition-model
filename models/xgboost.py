@@ -7,6 +7,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from dotenv import load_dotenv
 
 from typing import Optional, Dict
 from xgboost import XGBClassifier
@@ -24,11 +25,8 @@ warnings.filterwarnings("ignore", category=UserWarning)
 plt.switch_backend("agg")
 
 # Default path for the feature dictionary (if present)
-FEATURE_DICT_PATH_DEFAULT = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    "input",
-    "InterRAI data dictionary.xlsx",
-)
+load_dotenv(dotenv_path=".env", override=True)
+FEATURE_DICT_PATH_DEFAULT = os.getenv("FEATURE_DICT_PATH")
 
 
 class XGBoostModelTrainer:
