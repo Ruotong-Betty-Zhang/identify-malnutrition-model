@@ -39,6 +39,7 @@ This folder contains sequence and tabular baselines for predicting malnutrition 
 
 
 # How to Run
+The following files can be run through Python
 - **read_dataset.py**
   This file reads the dataset according to the .env path and stores processed dataframes in .pkl form in the datasets folder.
 - **main.py**
