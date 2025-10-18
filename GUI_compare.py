@@ -27,6 +27,15 @@ def show_error(message: str) -> None:
         # Fallback for rare cases where Tk messagebox is not available
         print(f"[Error] {message}")
 
+def _is_probably_dataframe(obj) -> bool:
+    """Return True if obj looks like a pandas DataFrame."""
+    return isinstance(obj, pd.DataFrame)
+
+def _is_probably_model(obj) -> bool:
+    """Return True if obj looks like a trained model/estimator."""
+    # Has a predict method; common for sklearn/xgboost etc.
+    return hasattr(obj, "predict") and callable(getattr(obj, "predict", None))
+
 # ------------------------------
 # Scrollable container
 # ------------------------------
@@ -120,6 +129,8 @@ class ResultPanel:
         self.nb.add(self.tab_fi, text="Feature Importance")
         self.nb.add(self.tab_shap, text="SHAP Analysis")
         self.nb.add(self.tab_align, text="Feature Alignment")
+
+
 
     # ---------- Renderers ----------
     def clear_tab(self, tab):
@@ -541,10 +552,15 @@ class ModelComparisonApp:
 
         # Action buttons
         btns = ttk.Frame(main)
-        btns.grid(row=2, column=0, sticky='ew', pady=(6,6))
-        ttk.Button(btns, text='Run A', command=lambda: self.run_evaluation('A')).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btns, text='Run B', command=lambda: self.run_evaluation('B')).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btns, text='Run A & B and Compare', command=self.run_compare).pack(side=tk.LEFT, padx=12)
+        btns.grid(row=2, column=0, sticky='ew', pady=(6, 6))
+
+        self.btn_run_a  = ttk.Button(btns, text='Run A', command=lambda: self.run_evaluation('A'))
+        self.btn_run_b  = ttk.Button(btns, text='Run B', command=lambda: self.run_evaluation('B'))
+        self.btn_run_ab = ttk.Button(btns, text='Run A & B and Compare', command=self.run_compare)
+
+        for b in (self.btn_run_a, self.btn_run_b, self.btn_run_ab):
+            b.pack(side=tk.LEFT, padx=5)
+
 
         # Results area: top notebook with A/B details and Comparison
         self.top_nb = ttk.Notebook(main)
@@ -566,6 +582,53 @@ class ModelComparisonApp:
 
         # Status bar
         ttk.Label(main, textvariable=self.status_var).grid(row=4, column=0, sticky='w')
+
+    def _set_busy(self, busy: bool):
+        state = 'disabled' if busy else 'normal'
+        for b in (self.btn_run_a, self.btn_run_b, self.btn_run_ab):
+            b.configure(state=state)
+
+    def browse_model(self, side: str):
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Model files", "*.pkl;*.joblib"), ("All files", "*.*")]
+        )
+        if not file_path:
+            return
+
+        self.model_path[side].set(file_path)
+
+        try:
+            obj = joblib.load(file_path)
+
+            # Guard: if user selected a dataset DataFrame here, block and explain.
+            if _is_probably_dataframe(obj) and not _is_probably_model(obj):
+                self.model_path[side].set("")          # clear the entry box
+                self.model[side] = None
+                self.model_feature_names[side] = None
+                self.feature_importances[side] = None
+                show_error(
+                    "This file looks like a dataset (pandas DataFrame), not a trained model.\n"
+                    "Please select a model file in the Model Path picker."
+                )
+                self.status_var.set(f"Model {side} load failed (wrong file type)")
+                return
+
+            if not _is_probably_model(obj):
+                raise ValueError("Unsupported file content: expected a trained model with a 'predict' method.")
+
+            self.model[side] = obj
+            self.model_feature_names[side] = self._get_model_feature_names(obj)
+            self.feature_importances[side] = self._get_feature_importances(obj)
+            self.status_var.set(f"Model {side} loaded")
+
+        except Exception as e:
+            # Clean up state on failure
+            self.model_path[side].set("")
+            self.model[side] = None
+            self.model_feature_names[side] = None
+            self.feature_importances[side] = None
+            show_error(f"Error loading model {side}: {e}")
+            self.status_var.set(f"Model {side} load failed")
 
     def _build_side_controls(self, parent, side: str, col: int, label: str):
         box = ttk.LabelFrame(parent, text=label, padding=8)
@@ -655,49 +718,82 @@ class ModelComparisonApp:
     def browse_dataset(self, side: str):
         file_types = [("PKL files", "*.pkl"), ("CSV files", "*.csv"), ("All files", "*.*")]
         file_path = filedialog.askopenfilename(filetypes=file_types)
-        if not file_path: return
+        if not file_path:
+            return
+
+        # If the extension suggests a different format, auto-adjust the radio selection.
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == ".csv":
+            self.data_format[side].set("csv")
+        elif ext == ".pkl":
+            self.data_format[side].set("pkl")
+
         self.dataset_path[side].set(file_path)
+
         try:
-            if self.data_format[side].get() == 'pkl':
-                df = joblib.load(file_path)
-            else:
+            fmt = self.data_format[side].get()
+            if fmt == "pkl":
+                obj = joblib.load(file_path)
+
+                # Guard: if user selected a model file here, block and explain.
+                if _is_probably_model(obj) and not _is_probably_dataframe(obj):
+                    self.dataset_path[side].set("")           # clear the entry box
+                    self.dataset_df[side] = None
+                    show_error(
+                        "This file looks like a model (has a predict method), not a dataset.\n"
+                        "Please select a dataset file in the Dataset Path picker."
+                    )
+                    self.status_var.set(f"Dataset {side} load failed (wrong file type)")
+                    return
+
+                # Accept DataFrame; also accept objects that round-trip to DataFrame
+                if _is_probably_dataframe(obj):
+                    df = obj
+                else:
+                    raise ValueError("Unsupported PKL content: expected a pandas DataFrame.")
+
+            else:  # csv
                 df = pd.read_csv(file_path, low_memory=False)
-            if not isinstance(df, pd.DataFrame):
-                raise ValueError('Unsupported data format (expect DataFrame).')
+
+            if not _is_probably_dataframe(df):
+                raise ValueError("Unsupported data format (expected a pandas DataFrame).")
+
             self.dataset_df[side] = df
-            combo: ttk.Combobox = getattr(self, f'target_combo_{side}')
-            combo['values'] = list(df.columns)
+            combo: ttk.Combobox = getattr(self, f"target_combo_{side}")
+            combo["values"] = list(df.columns)
             if df.columns.size > 0:
                 self.target_var[side].set(df.columns[-1])
             self.status_var.set(f"Dataset {side} loaded: {df.shape}")
-        except Exception as e:
-            show_error(f'Error loading dataset {side}: {e}')
 
-    def browse_model(self, side: str):
-        file_path = filedialog.askopenfilename(filetypes=[("Model files", "*.pkl;*.joblib"), ("All files", "*.*")])
-        if not file_path: return
-        self.model_path[side].set(file_path)
-        try:
-            model = joblib.load(file_path)
-            self.model[side] = model
-            self.model_feature_names[side] = self._get_model_feature_names(model)
-            self.feature_importances[side] = self._get_feature_importances(model)
-            self.status_var.set(f"Model {side} loaded")
         except Exception as e:
-            show_error(f'Error loading model {side}: {e}')
+            # Clean up state on failure
+            self.dataset_path[side].set("")
+            self.dataset_df[side] = None
+            show_error(f"Error loading dataset {side}: {e}")
+            self.status_var.set(f"Dataset {side} load failed")
+
 
     # ---------- Run evaluation & comparison ----------
     def run_evaluation(self, side: str):
-        t = threading.Thread(target=lambda: self._run_eval_thread(side), daemon=True)
-        t.start()
+        self._set_busy(True)
+        def _task():
+            try:
+                self._run_eval_thread(side)
+            finally:
+                self.root.after(0, lambda: self._set_busy(False))
+        threading.Thread(target=_task, daemon=True).start()
 
     def run_compare(self):
+        self._set_busy(True)
         def _go():
-            self._run_eval_thread('A')
-            self._run_eval_thread('B')
-            self.root.after(0, self._render_comparison)
-        t = threading.Thread(target=_go, daemon=True)
-        t.start()
+            try:
+                self._run_eval_thread('A')
+                self._run_eval_thread('B')
+                self.root.after(0, self._render_comparison)
+            finally:
+                self.root.after(0, lambda: self._set_busy(False))
+        threading.Thread(target=_go, daemon=True).start()
+
 
     def _run_eval_thread(self, side: str):
         try:
