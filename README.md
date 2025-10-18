@@ -43,7 +43,7 @@ This folder contains sequence and tabular baselines for predicting malnutrition 
   This file reads the dataset according to the .env path and stores processed dataframes in .pkl form in the datasets folder.
 - **main.py**
   This file uses the dataframes in the datasets folder to train models accordingly. The result is printed in the console and stored in the outputs folder.
-- **GUI-compare.py**
+- **GUI.py**
   This file opens the graphical interface that is used to evaluate and compare models. It can also run with just one model.
 - **./models/LSTM/**
   The four files under this directory are training files of LSTM models. Simply runs the file to start the training. Modify the dataset path in the `__main__` function manually.
@@ -52,7 +52,7 @@ This folder contains sequence and tabular baselines for predicting malnutrition 
 ## Launch
 from the project root 
 ``` bash
-python GUI_compare.py
+python GUI.py
 ```
 ## File types the tool expects
 - Dataset Path: `.pkl` (pickled pandas DataFrame) or `.csv`
