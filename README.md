@@ -108,7 +108,10 @@ The **Comparison** tab provides side-by-side views and aligns class labels acros
 
 # Suggestion of Future Work
 ## Improvement on Data Augmentation
-The data augmentation algorithm used in this project does not improve much on the recall score of the minority class. This might be caused by the overly imbalanced dataset, or the algorithm invented some non-existent relationship between features. A better data augmentation algorithm would make the identified features more convincing.
+The data augmentation algorithm used in this project does not improve much on the recall score of the minority class. This might be caused by the overly imbalanced dataset, or the algorithm invented some non-existent relationships between features. A better data augmentation algorithm would make the identified features more convincing.
 
 ## Better Longitudinal Analysis
 The longitudinal analysis method used in this project is overly simplified. A better analysis of a dataset with even assessment intervals and including more features other than the numerical features may allow models to capture underlying relationships between features and malnutrition risk.
+
+## Statistical Tools
+Statistical tools could be used to analyze the output feature importance and SHAP values to identify patterns. These analyses can reveal which features consistently contribute most to the predictions across different datasets and models.
