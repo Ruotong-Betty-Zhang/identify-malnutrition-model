@@ -97,7 +97,7 @@ class XGBoostModelTrainer:
         xgb = XGBClassifier(
             eval_metric='mlogloss',
             tree_method='hist',
-            device=self.device,
+            device='cpu',
             random_state=self.seed
         )
 
